@@ -9,21 +9,27 @@ import { pois } from './pois.ts';
 import { spawnCoins, type RoadSampler } from './coins.ts';
 import { bumpCityCells, cityAtSync, ensureCityAt } from './cities.ts';
 import { useGame } from './store.ts';
-import { sfx, vibrate } from './audio.ts';
+import { haptic, sfx, vibrate } from './audio.ts';
 import { loadTrack, saveTrack } from './persist.ts';
+import { roadsNear, waitForTiles } from './tiles.ts';
 import { COIN_LABEL, COIN_VALUE, POI_INFO } from '../sprites/items.ts';
+import type { PlayerFix } from './types.ts';
 
 const MAX_CAPTURE_M = Math.max(...Object.values(POI_INFO).map((i) => i.radius));
-import type { PlayerFix } from './types.ts';
+/** Quanto esperar as ruas em volta carregarem antes de espalhar moedas. */
+const SPAWN_WAIT_MS = 4000;
 
 let last: PlayerFix | null = null;
 let track: number[] = [];
 let trackSavedLen = 0;
 let distXpAcc = 0;
+/** Substitui a fonte de ruas (testes). Padrão: ruas dos tiles carregados por tiles.ts. */
 let roadSampler: RoadSampler | null = null;
+/** Spawn em andamento (esperando os tiles): evita lotes duplicados. */
+let spawning = false;
 const trackListeners = new Set<(track: number[]) => void>();
 
-export function setRoadSampler(fn: RoadSampler): void {
+export function setRoadSampler(fn: RoadSampler | null): void {
   roadSampler = fn;
 }
 
@@ -52,16 +58,32 @@ function distToSegment(p: LngLat, a: LngLat, b: LngLat): number {
   return Math.sqrt(dx * dx + dy * dy) * k;
 }
 
-function spawnAround(p: LngLat): void {
-  const s = useGame.getState();
-  const live = s.live;
-  if (!live || live.spawns >= MAX_SPAWNS_PER_ACTIVITY) return;
-  const fresh = spawnCoins(p, COINS_PER_SPAWN, COIN_SPAWN_RADIUS_M, roadSampler, s.coins);
-  useGame.setState({
-    coins: [...s.coins, ...fresh],
-    live: { ...live, spawns: live.spawns + 1, spawnCenters: [...live.spawnCenters, { lng: p.lng, lat: p.lat }] },
-  });
-  if (live.spawns > 0) s.toast(`${fresh.length} moedas novas apareceram por aqui!`, 'info');
+/**
+ * Espalha um lote de moedas sobre as ruas em volta de p. Espera (até ~4 s) os tiles em volta
+ * carregarem, para as moedas caírem nas ruas; sem rede, cai no disco em volta do ponto.
+ */
+async function spawnAround(p: LngLat): Promise<void> {
+  const before = useGame.getState().live;
+  if (spawning || !before || before.spawns >= MAX_SPAWNS_PER_ACTIVITY) return;
+  spawning = true;
+  try {
+    if (!roadSampler) await waitForTiles(p, COIN_SPAWN_RADIUS_M, SPAWN_WAIT_MS);
+    const s = useGame.getState();
+    const live = s.live;
+    // a atividade terminou, trocou ou já ganhou esse lote enquanto esperávamos
+    if (!live || live.id !== before.id || live.spawns !== before.spawns) return;
+    const sampler: RoadSampler = roadSampler ?? (() => roadsNear(p, COIN_SPAWN_RADIUS_M));
+    const fresh = spawnCoins(p, COINS_PER_SPAWN, COIN_SPAWN_RADIUS_M, sampler, s.coins);
+    useGame.setState({
+      coins: [...s.coins, ...fresh],
+      live: { ...live, spawns: live.spawns + 1, spawnCenters: [...live.spawnCenters, { lng: p.lng, lat: p.lat }] },
+    });
+    if (live.spawns > 0) s.toast(`${fresh.length} moedas novas apareceram por aqui!`, 'info');
+  } catch (err) {
+    console.warn('[tracker] spawn falhou', err);
+  } finally {
+    spawning = false;
+  }
 }
 
 function collectNear(a: LngLat, b: LngLat): void {
@@ -89,13 +111,14 @@ function captureNear(a: LngLat, b: LngLat): void {
   }
 }
 
-function persistTrack(force = false): void {
+function persistTrack(force = false): Promise<void> {
   const live = useGame.getState().live;
-  if (!live) return;
+  if (!live) return Promise.resolve();
   if (force || track.length - trackSavedLen >= 60) {
     trackSavedLen = track.length;
-    void saveTrack(live.id, track);
+    return saveTrack(live.id, track);
   }
+  return Promise.resolve();
 }
 
 export function handleFix(fix: PlayerFix): void {
@@ -116,7 +139,7 @@ export function handleFix(fix: PlayerFix): void {
     last = fix;
     track.push(fix.lng, fix.lat, fix.t);
     emitTrack();
-    if (live.spawnCenters.length === 0) spawnAround(fix);
+    if (live.spawnCenters.length === 0) void spawnAround(fix);
     revealAndCollect(fix, fix);
     return;
   }
@@ -132,6 +155,7 @@ export function handleFix(fix: PlayerFix): void {
     if (!s.speedWarning) {
       useGame.setState({ speedWarning: true });
       sfx.warn();
+      haptic('warning');
     }
     last = fix;
     return;
@@ -155,12 +179,12 @@ export function handleFix(fix: PlayerFix): void {
 
   track.push(fix.lng, fix.lat, fix.t);
   emitTrack();
-  persistTrack();
+  void persistTrack();
 
   revealAndCollect(last, fix);
 
   const centers = useGame.getState().live?.spawnCenters ?? [];
-  if (centers.length && centers.every((c) => haversine(c, fix) > RESPAWN_DISTANCE_M)) spawnAround(fix);
+  if (centers.length && centers.every((c) => haversine(c, fix) > RESPAWN_DISTANCE_M)) void spawnAround(fix);
 
   last = fix;
 }
@@ -183,7 +207,7 @@ function revealAndCollect(a: PlayerFix, b: PlayerFix): void {
   captureNear(a, b);
 }
 
-/** Restaura a trilha de uma atividade interrompida (recarregou a página no meio). */
+/** Restaura a trilha de uma atividade interrompida (o app foi fechado no meio). */
 export async function restoreLiveTrack(): Promise<void> {
   const live = useGame.getState().live;
   if (!live) return;
@@ -209,7 +233,7 @@ export function onActivityChange(): void {
 }
 
 export async function finishAndSaveTrack(): Promise<void> {
-  persistTrack(true);
+  await persistTrack(true);
 }
 
 /** Esquece a última posição (teletransporte do simulador não conta como deslocamento). */

@@ -1,5 +1,5 @@
 // Pontos capturáveis vêm da camada `poi` dos vector tiles (OpenMapTiles/OpenFreeMap):
-// sem API extra e sem limite de requisições. O mapa entrega as features, aqui viram POIs.
+// sem API extra e sem limite de requisições. tiles.ts entrega as features, aqui viram POIs.
 import { POI_INFO, type PoiCategory, type Rarity } from '../sprites/items.ts';
 import { haversine, type LngLat } from './geo.ts';
 import type { Poi } from './types.ts';
@@ -67,8 +67,42 @@ const sourceZoom = new Map<string, number>();
 const byName = new Map<string, string[]>();
 const listeners = new Set<() => void>();
 
+// O Hermes pode vir sem `normalize`/`toLocaleLowerCase` completos (depende do build com Intl): testa uma vez.
+const HAS_NFD = (() => {
+  try {
+    return 'á'.normalize('NFD').length === 2;
+  } catch {
+    return false;
+  }
+})();
+
+const ACCENTS: [string, string][] = [
+  ['àáâãäåāăą', 'a'], ['çćĉċč', 'c'], ['ďđ', 'd'], ['èéêëēĕėęě', 'e'], ['ĝğġģ', 'g'],
+  ['ĥħ', 'h'], ['ìíîïĩīĭįı', 'i'], ['ĵ', 'j'], ['ķ', 'k'], ['ĺļľŀł', 'l'], ['ñńņňŉ', 'n'],
+  ['òóôõöøōŏő', 'o'], ['ŕŗř', 'r'], ['śŝşšș', 's'], ['ţťŧț', 't'], ['ùúûüũūŭůűų', 'u'],
+  ['ŵ', 'w'], ['ýÿŷ', 'y'], ['źżž', 'z'],
+];
+const ACCENT_MAP = new Map<string, string>();
+for (const [chars, base] of ACCENTS) for (const ch of chars) ACCENT_MAP.set(ch, base);
+
+function lower(s: string): string {
+  try {
+    return s.toLocaleLowerCase('pt-BR');
+  } catch {
+    return s.toLowerCase();
+  }
+}
+
+/** Remove acentos (minúsculas). */
+export function stripAccents(s: string): string {
+  if (HAS_NFD) return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  let out = '';
+  for (const ch of s) out += ACCENT_MAP.get(ch) ?? ch;
+  return out;
+}
+
 function norm(s: string): string {
-  return s.toLocaleLowerCase('pt-BR').normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+  return stripAccents(lower(s)).trim();
 }
 
 export const pois = {
@@ -86,7 +120,7 @@ export const pois = {
     return () => listeners.delete(fn);
   },
 
-  /** Adiciona features vindas do mapa. Retorna quantos POIs novos entraram. */
+  /** Adiciona features vindas dos tiles. Retorna quantos POIs novos entraram. */
   harvest(features: RawPoiFeature[], namePreference: string[] = ['name:pt', 'name', 'name:latin']): number {
     let added = 0;
     let moved = 0;

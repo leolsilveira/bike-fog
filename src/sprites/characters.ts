@@ -1,7 +1,6 @@
 // Personagens em pixel art (chibi 16-bit). Cabeça e corpo são camadas separadas
 // para combinar penteados, capacete (ciclismo) e paletas por personagem.
-import type { Art, Palette, Layer } from './pixel.ts';
-import { rasterize, flipRaster, type Raster } from './pixel.ts';
+import { rasterize, flipRaster, type Art, type Palette, type Layer, type Raster } from './pixel.ts';
 
 export type Dir = 'down' | 'up' | 'side';
 export type Facing = 'down' | 'up' | 'left' | 'right';

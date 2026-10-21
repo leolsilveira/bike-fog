@@ -1,6 +1,5 @@
 // Moedas e emblemas de pontos capturáveis (POIs).
-import type { Art, Palette } from './pixel.ts';
-import { rasterize, createRaster, blit, blendPixel, hexToRgba, type Raster } from './pixel.ts';
+import { rasterize, createRaster, blit, blendPixel, hexToRgba, type Art, type Palette, type Raster } from './pixel.ts';
 
 const O = '#2a1f3d';
 

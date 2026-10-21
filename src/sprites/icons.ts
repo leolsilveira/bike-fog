@@ -1,6 +1,5 @@
 // Ícones de interface 12x12 em pixel art. 'x' = cor principal, 'a' = destaque.
-import type { Art } from './pixel.ts';
-import { rasterize, type Raster } from './pixel.ts';
+import { rasterize, type Art, type Raster } from './pixel.ts';
 
 const ICONS = {
   map: [

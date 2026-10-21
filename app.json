@@ -1,0 +1,78 @@
+{
+  "expo": {
+    "name": "Desbrava",
+    "slug": "desbrava",
+    "scheme": "desbrava",
+    "version": "0.2.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#1d1730",
+    "ios": {
+      "bundleIdentifier": "com.desbrava.app",
+      "supportsTablet": false,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.desbrava.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#2a2445",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "blockedPermissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_BACKGROUND_LOCATION"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "name": "Desbrava",
+      "shortName": "Desbrava",
+      "lang": "pt-BR",
+      "themeColor": "#2a2445",
+      "backgroundColor": "#1d1730"
+    },
+    "plugins": [
+      "expo-asset",
+      "expo-status-bar",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "enableBackgroundPlayback": false
+        }
+      ],
+      "expo-font",
+      "expo-sharing",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 160,
+          "resizeMode": "contain",
+          "backgroundColor": "#1d1730"
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "O Desbrava usa sua localização para revelar a névoa por onde você passa, coletar moedas e capturar pontos turísticos.",
+          "locationAlwaysAndWhenInUsePermission": "Permita o acesso \"Sempre\" para continuar gravando sua pedalada ou corrida com a tela apagada ou o celular no bolso.",
+          "locationAlwaysPermission": "Permita o acesso \"Sempre\" para continuar gravando sua pedalada ou corrida com a tela apagada ou o celular no bolso.",
+          "motionUsagePermission": false,
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": false,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ]
+    ]
+  }
+}
