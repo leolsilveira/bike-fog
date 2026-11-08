@@ -31,10 +31,19 @@ export const MAX_ACCURACY_M = 45;
 /** Av. Paulista — usada quando não há GPS ou no simulador. */
 export const DEFAULT_CENTER = { lng: -46.6559, lat: -23.5614 };
 
+/**
+ * Balanceamento do XP (modelo em que corrida e pedal rendem parecido por minuto de atividade):
+ * - distância: o que sustenta a progressão em rotas conhecidas;
+ * - células novas: bônus de exploração (1 km em área nova ≈ 250 células);
+ * - moedas: metade do valor (a recompensa principal delas é a carteira);
+ * - capturas: RARITY_INFO.xp (25 a 300).
+ * Uma primeira corrida de 1,5 km em área nova rende ~250 XP (nível 2); uma semana de 3 saídas, nível ~6.
+ */
 export const XP = {
-  perKm: { bike: 12, run: 30 } as Record<Modality, number>,
-  perCell: 2,
-  perCoinValue: 1,
+  perKm: { bike: 8, run: 20 } as Record<Modality, number>,
+  /** A bike cobre ~2x mais chão por minuto, então cada célula vale metade. */
+  perCell: { bike: 0.1, run: 0.2 } as Record<Modality, number>,
+  perCoinValue: 0.5,
 };
 
 export const ZOOM = {

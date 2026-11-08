@@ -9,7 +9,7 @@
     "userInterfaceStyle": "dark",
     "backgroundColor": "#1d1730",
     "ios": {
-      "bundleIdentifier": "com.desbrava.app",
+      "bundleIdentifier": "com.leolsilveira.desbrava.app",
       "supportsTablet": false,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false

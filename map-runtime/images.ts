@@ -50,6 +50,31 @@ class AnimatedSprite implements StyleImageInterface {
   }
 }
 
+/**
+ * Seta da rota (chevron apontando para a direita): com `symbol-placement: line` o MapLibre a gira no sentido
+ * da linha. Creme com contorno escuro, gerado aqui em vez de virar mais um sprite.
+ */
+const ARROW_ROWS = ['##.....', '.##....', '..##...', '...##..', '..##...', '.##....', '##.....'];
+
+function arrowRaster(): Raster {
+  const pad = 1;
+  const h = ARROW_ROWS.length + pad * 2;
+  const w = ARROW_ROWS[0].length + pad * 2;
+  const on = (x: number, y: number) => ARROW_ROWS[y - pad]?.[x - pad] === '#';
+  const data = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      let rgb: [number, number, number] | null = null;
+      if (on(x, y)) rgb = [0xff, 0xf6, 0xe0];
+      else if (on(x - 1, y) || on(x + 1, y) || on(x, y - 1) || on(x, y + 1)) rgb = [0x1d, 0x17, 0x30];
+      if (!rgb) continue;
+      data.set([...rgb, 255], i);
+    }
+  }
+  return { w, h, data };
+}
+
 type ImageFactory = () => void;
 
 export function registerImages(map: MLMap): void {
@@ -69,6 +94,7 @@ export function registerImages(map: MLMap): void {
     add(`poi-${cat}-captured`, () => asImage(poiBadge(cat, 'captured'), SPRITE_CSS_SCALE));
   }
   add('poi-fog', () => asImage(poiBadge('parque', 'fog'), SPRITE_CSS_SCALE));
+  add('route-arrow', () => asImage(arrowRaster(), 3));
   for (const kind of COIN_KINDS) {
     factories.set(`coin-${kind}`, () => {
       const id = `coin-${kind}`;

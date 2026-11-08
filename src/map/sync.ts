@@ -3,7 +3,7 @@
 // GPS, simulador e telemetria `player` são do core (location.ts), não daqui.
 import { AppState, type AppStateStatus } from 'react-native';
 import { mapHost } from '../bridge/mapHost.ts';
-import type { HostToMap, LiveStatus, PoiMarker } from '../bridge/protocol.ts';
+import type { CameraMode, HostToMap, LiveStatus, PoiMarker } from '../bridge/protocol.ts';
 import { DEFAULT_CENTER, POI_NEARBY_M } from '../game/config.ts';
 import { fog } from '../game/fog.ts';
 import { cellOf, haversine, toMerc, type LngLat } from '../game/geo.ts';
@@ -43,6 +43,12 @@ let view: { west: number; south: number; east: number; north: number } | null = 
 let viewZoom: number | null = null;
 /** Margem em volta da área visível, para os POIs não "brotarem" na borda ao arrastar. */
 const VIEW_PAD = 0.25;
+
+/** Câmera inclinada só com atividade em andamento (gravando ou pausada); fora disso, visão de cima. */
+function cameraMode(s: GameState): CameraMode {
+  if (s.tab === 'stats') return 'stats';
+  return s.live ? 'ride' : 'map';
+}
 
 function liveStatus(s: GameState): LiveStatus {
   return s.live?.status ?? 'none';
@@ -270,18 +276,29 @@ function resync(): void {
   mapHost.send({
     type: 'init',
     center: { lng: c.lng, lat: c.lat },
-    mode: s.tab,
+    mode: cameraMode(s),
     live: liveStatus(s),
     profile: profileOf(s),
   });
   sendAllCells();
   sendCoins();
   sendFullTrack();
+  sendRoute();
   view = null;
   viewZoom = null;
   poiCenter = null;
   lastPoisJson = '';
   refreshPois(true);
+}
+
+function sendRoute(): void {
+  const r = useGame.getState().route;
+  mapHost.send({ type: 'route', route: r ? { coords: r.coords, dest: { lng: r.dest.lng, lat: r.dest.lat } } : null });
+  sendRouteDone();
+}
+
+function sendRouteDone(): void {
+  mapHost.send({ type: 'routeDone', doneM: useGame.getState().routeProgress?.doneM ?? 0 });
 }
 
 let wasBackground = false;
@@ -323,9 +340,15 @@ export function startMapSync(): void {
 
   useGame.subscribe((s, prev) => {
     if (s.coins !== prev.coins) sendCoins();
+    // só o trajeto interessa ao mapa (as paradas mudam durante a atividade sem mudar o desenho)
+    if (s.route?.coords !== prev.route?.coords) sendRoute();
+    else if (s.routeProgress?.doneM !== prev.routeProgress?.doneM) sendRouteDone();
+    // folha fechada sem iniciar (X, toque fora, botão do meio, outra aba): a câmera pode estar enquadrando a
+    // rota descartada, então volta para o jogador
+    if (prev.planning && !s.planning && !s.live && s.tab === 'map') mapController.recenter();
     if (s.captures !== prev.captures || s.selected !== prev.selected) markPoisDirty();
-    if (s.tab !== prev.tab || liveStatus(s) !== liveStatus(prev)) {
-      mapHost.send({ type: 'mode', mode: s.tab, live: liveStatus(s) });
+    if (cameraMode(s) !== cameraMode(prev) || liveStatus(s) !== liveStatus(prev)) {
+      mapHost.send({ type: 'mode', mode: cameraMode(s), live: liveStatus(s) });
     }
     const p = s.profile;
     if (p && (p.characterId !== prev.profile?.characterId || p.modality !== prev.profile?.modality)) {
@@ -344,7 +367,11 @@ export function startMapSync(): void {
     updateViewTiles(view);
     markPoisDirty();
   });
-  mapHost.on('select', (m) => useGame.getState().select((m.id && pois.get(m.id)) || null));
+  mapHost.on('select', (m) => {
+    // com a folha "Nova atividade" aberta o mapa é só para ver a rota: o cartão do POI ficaria por cima dela
+    if (useGame.getState().planning) return;
+    useGame.getState().select((m.id && pois.get(m.id)) || null);
+  });
   mapHost.on('log', (m) => {
     const line = `[mapa] ${m.msg}`;
     if (m.level === 'error') console.error(line);

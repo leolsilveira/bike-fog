@@ -16,10 +16,11 @@ import { CityChip, PlayerChip, SideButtons, TopHud, useNow, Wallet } from '../co
 import { Arcade, Muted, PxBox, PxCell, Txt } from '../components/Px.tsx';
 import { C, FILL, FONT, M, useSafe } from '../theme.ts';
 
-// O CityChip mora em Hud.tsx (usado também pela aba Gravar); reexportado aqui como no original.
+// O CityChip mora em Hud.tsx (usado também pela tela da atividade); reexportado aqui como no original.
 export { CityChip };
 
-export function MapTab() {
+/** `hideNearby`: esconde o painel "Por perto" (a folha "Nova atividade" ocupa o mesmo lugar). */
+export function MapTab({ hideNearby = false }: { hideNearby?: boolean }) {
   const poiRev = useGame((s) => s.poiRev);
   const captures = useGame((s) => s.captures);
   const selected = useGame((s) => s.selected);
@@ -45,7 +46,7 @@ export function MapTab() {
         <CityChip />
       </View>
       <SideButtons showZoom />
-      {!selected && <Nearby items={nearby} open={open} onToggle={() => setOpen((o) => !o)} />}
+      {!selected && !hideNearby && <Nearby items={nearby} open={open} onToggle={() => setOpen((o) => !o)} />}
     </View>
   );
 }

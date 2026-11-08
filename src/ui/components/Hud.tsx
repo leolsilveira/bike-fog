@@ -70,9 +70,10 @@ function toastInStyle(v: Animated.Value) {
 // Barra de abas
 // ---------------------------------------------------------------------------
 
-const TABS: { id: Tab; label: string; icon: 'pin' | 'record' | 'stats' }[] = [
+/** Itens da barra: duas abas nas pontas e, no meio, a ação de gravar (não é aba). */
+const ITEMS: ({ id: Tab; label: string; icon: 'pin' | 'stats' } | { id: 'record' })[] = [
   { id: 'map', label: 'Mapa', icon: 'pin' },
-  { id: 'record', label: 'Gravar', icon: 'record' },
+  { id: 'record' },
   { id: 'stats', label: 'Stats', icon: 'stats' },
 ];
 
@@ -82,8 +83,10 @@ const ORB_PULSE = [C.coral, mix(C.coral, '#ff8a7a', 0.5), '#ff8a7a', mix(C.coral
 export function TabBar() {
   const tab = useGame((s) => s.tab);
   const setTab = useGame((s) => s.setTab);
-  const recording = useGame((s) => s.live?.status === 'recording');
+  const status = useGame((s) => s.live?.status ?? null);
+  const planning = useGame((s) => s.planning);
   const { safeB } = useSafe();
+  const recording = status === 'recording';
   const pulse = useStepper(300, 4, recording);
   return (
     <View style={[styles.tabbar, { height: M.tabbarH + safeB }]} testID="tabbar">
@@ -93,9 +96,44 @@ export function TabBar() {
         style={styles.noTouchFill}
       />
       <View style={styles.tabRow}>
-        {TABS.map((t) => {
-          const active = tab === t.id;
-          const center = t.id === 'record';
+        {ITEMS.map((t) => {
+          if (t.id === 'record') {
+            // sem atividade: abre a folha "Nova atividade"; com atividade: volta para a tela da atividade
+            const active = planning || (status != null && tab === 'map');
+            const color = active ? C.gold : C.muted;
+            const icon = status === 'paused' ? 'pause' : 'record';
+            const label = recording ? 'Gravando' : status === 'paused' ? 'Pausado' : 'Gravar';
+            return (
+              <Pressable
+                key="record"
+                testID="tab-record"
+                accessibilityRole="button"
+                accessibilityLabel={status ? 'Ver atividade' : 'Nova atividade'}
+                style={[styles.tab, styles.tabCenter]}
+                onPress={() => {
+                  sfx.click();
+                  const s = useGame.getState();
+                  if (s.live) setTab('map');
+                  else s.setPlanning(!s.planning);
+                }}
+              >
+                <View style={[styles.orb, { backgroundColor: recording ? ORB_PULSE[pulse] : C.coral }]}>
+                  <Inset side="bottom" h={5} color={C.coralDark} />
+                  <Inset side="top" h={3} color="rgba(255, 255, 255, 0.3)" />
+                  <PxOutline />
+                  <View style={styles.tabIcon}>
+                    {/* `.tab.active img` também pega o ícone do orbe */}
+                    {active && <Icon name={icon} size={30} color={C.ink} accent={C.ink} style={styles.iconShadow} />}
+                    <Icon name={icon} size={30} color={C.cream} accent={C.cream} />
+                  </View>
+                </View>
+                <Txt size={13} weight={700} spacing={0.04} upper color={color} numberOfLines={1}>
+                  {label}
+                </Txt>
+              </Pressable>
+            );
+          }
+          const active = tab === t.id && !planning && !(status != null && t.id === 'map');
           const color = active ? C.gold : C.muted;
           return (
             <Pressable
@@ -103,34 +141,21 @@ export function TabBar() {
               testID={`tab-${t.id}`}
               accessibilityRole="tab"
               accessibilityState={{ selected: active }}
-              style={[styles.tab, center ? styles.tabCenter : styles.tabSide]}
+              style={[styles.tab, styles.tabSide]}
               onPress={() => {
-                if (tab !== t.id) sfx.click();
+                if (!active) sfx.click();
+                const s = useGame.getState();
+                if (s.planning) s.setPlanning(false);
                 setTab(t.id);
               }}
             >
-              {center ? (
-                <View style={[styles.orb, { backgroundColor: recording ? ORB_PULSE[pulse] : C.coral }]}>
-                  <Inset side="bottom" h={5} color={C.coralDark} />
-                  <Inset side="top" h={3} color="rgba(255, 255, 255, 0.3)" />
-                  <PxOutline />
-                  <View style={styles.tabIcon}>
-                    {/* `.tab.active img` também pega o ícone do orbe */}
-                    {active && (
-                      <Icon name={recording ? 'pause' : 'record'} size={30} color={C.ink} accent={C.ink} style={styles.iconShadow} />
-                    )}
-                    <Icon name={recording ? 'pause' : 'record'} size={30} color={C.cream} accent={C.cream} />
-                  </View>
-                </View>
-              ) : (
-                <View style={styles.tabIcon}>
-                  {/* `.tab.active img { filter: drop-shadow(0 2px 0 var(--ink)) }` */}
-                  {active && <Icon name={t.icon} size={30} color={C.ink} accent={C.ink} style={styles.iconShadow} />}
-                  <Icon name={t.icon} size={30} color={color} accent={active ? C.cream : C.iconMuted} />
-                </View>
-              )}
+              <View style={styles.tabIcon}>
+                {/* `.tab.active img { filter: drop-shadow(0 2px 0 var(--ink)) }` */}
+                {active && <Icon name={t.icon} size={30} color={C.ink} accent={C.ink} style={styles.iconShadow} />}
+                <Icon name={t.icon} size={30} color={color} accent={active ? C.cream : C.iconMuted} />
+              </View>
               <Txt size={13} weight={700} spacing={0.04} upper color={color} numberOfLines={1}>
-                {recording && center ? 'Gravando' : t.label}
+                {t.label}
               </Txt>
             </Pressable>
           );
@@ -189,7 +214,7 @@ export function Wallet() {
   );
 }
 
-/** Cidade atual e % explorado (usado nas abas Mapa e Gravar). */
+/** Cidade atual e % explorado (aba Mapa e tela da atividade). */
 export function CityChip({ style }: { style?: StyleProp<ViewStyle> }) {
   const city = useGame((s) => (s.currentCityId ? s.cities[s.currentCityId] : null));
   if (!city) return null;
@@ -308,6 +333,19 @@ function ToastView({ toast: t, leaving, afterCity, onGone }: {
   );
 }
 
+/**
+ * Topo dos avisos sobre o mapa (velocidade, cartões que somem sozinhos): 150 px abaixo da área segura, como no
+ * original. Na tela da atividade com rota, desce a altura da faixa da rota para não cobri-la.
+ */
+export function useOverlayTop(): number {
+  const { safeT } = useSafe();
+  const routeBar = useGame((s) => s.live != null && s.route != null && s.tab === 'map');
+  return 150 + safeT + (routeBar ? ROUTE_BAR_H : 0);
+}
+
+/** Altura aproximada da faixa da rota no RideScreen (margem + 2 linhas de texto + barra). */
+const ROUTE_BAR_H = 86;
+
 // ---------------------------------------------------------------------------
 // Aviso de velocidade
 // ---------------------------------------------------------------------------
@@ -317,12 +355,12 @@ const BLINK = [1, 1.075, 1.15, 1.075];
 
 export function SpeedBanner() {
   const warn = useGame((s) => s.speedWarning);
-  const { safeT } = useSafe();
+  const top = useOverlayTop();
   const i = useStepper(250, 4, warn);
   if (!warn) return null;
   const k = BLINK[i];
   return (
-    <View style={[styles.bannerWrap, { top: 150 + safeT }]}>
+    <View style={[styles.bannerWrap, { top }]}>
       <PxBox
         bg={brighten(C.coral, k)}
         color={brighten(C.cream, k)}

@@ -34,6 +34,13 @@ export const mapController = {
   zoomBy(delta: number): void {
     mapHost.send({ type: 'camera', action: 'zoomBy', delta });
   },
+  /** Enquadra uma área (ex.: a rota planejada), deixando `padding` px livres nas bordas para a interface. */
+  fit(
+    b: { west: number; south: number; east: number; north: number },
+    padding: { top: number; bottom: number; left: number; right: number },
+  ): void {
+    mapHost.send({ type: 'camera', action: 'fit', ...b, padding });
+  },
 };
 
 export function useFollowing(): boolean {
