@@ -12,13 +12,17 @@ import {
 } from 'react-native';
 import Svg, { Defs, Path, RadialGradient, Stop } from 'react-native-svg';
 import { useGame } from '../../game/store.ts';
-import { sfx } from '../../game/audio.ts';
+import { haptic, sfx } from '../../game/audio.ts';
+import {
+  ACHIEVEMENT_CATEGORIES, buildAchievementOverview, type AchievementCardItem,
+} from '../../game/achievements.ts';
 import { cellSizeM, formatArea, formatDistance, formatDuration, formatPace, formatSpeed } from '../../game/geo.ts';
-import { CHARACTERS } from '../../sprites/characters.ts';
+import { resolveAvatar, type AvatarConfig } from '../../sprites/avatar.ts';
 import { POI_INFO, RARITY_INFO } from '../../sprites/items.ts';
-import type { ActivitySummary, Capture } from '../../game/types.ts';
+import type { AchievementCategory, AchievementUnlockEvent, ActivitySummary, Capture } from '../../game/types.ts';
+import { AvatarCustomizer } from './AvatarCustomizer.tsx';
 import { BadgeImg, CharacterSprite, CoinImg, Icon } from './Sprites.tsx';
-import { Arcade, Inset, Muted, PxBox, PxButton, Txt } from './Px.tsx';
+import { Arcade, Bar, Chip, Muted, PxBox, PxButton, PxCell, Txt } from './Px.tsx';
 import { C, FILL, useSafe } from '../theme.ts';
 
 const useNativeDriver = Platform.OS !== 'web';
@@ -313,7 +317,7 @@ function LevelUpModal({ level, title, onClose }: { level: number; title: string;
         <CaptureStage>
           {profile && (
             <CharacterSprite
-              characterId={profile.characterId}
+              avatar={resolveAvatar(profile)}
               modality={profile.modality}
               facing="down"
               width={passive ? 56 : 120}
@@ -332,6 +336,175 @@ function LevelUpModal({ level, title, onClose }: { level: number; title: string;
       <Actions>
         <PxButton variant="gold" block onPress={onClose} testID="modal-ok">
           Bora!
+        </PxButton>
+      </Actions>
+    </ModalCard>
+  );
+}
+
+function AchievementUnlockModal({ unlock, onClose }: { unlock: AchievementUnlockEvent; onClose: () => void }) {
+  const passive = useContext(PassiveCtx);
+  useEffect(() => {
+    sfx.coinBig();
+    haptic('success');
+  }, [unlock.key]);
+  const g = passive ? 3 : 6;
+  return (
+    <ModalCard testID="modal-achievement">
+      <Title>CONQUISTA!</Title>
+      {unlock.tier != null && unlock.maxTier != null && unlock.maxTier > 1 && (
+        <Arcade size={10} color={C.muted} align="center" style={{ marginTop: 5 }}>
+          NÍVEL {unlock.tier}/{unlock.maxTier}
+        </Arcade>
+      )}
+      <View style={{ marginTop: passive ? 4 : 8 }}>
+        <CaptureStage>
+          <Bob>
+            <Icon name={unlock.icon} size={passive ? 52 : 96} color={C.gold} accent={C.cream} />
+          </Bob>
+        </CaptureStage>
+      </View>
+      <Txt weight={700} size={passive ? 17 : 19} align="center" style={{ marginTop: g }}>
+        {unlock.title}
+      </Txt>
+      <Muted align="center" style={{ marginTop: 2 }}>
+        {unlock.subtitle}
+      </Muted>
+      <View style={[styles.achRewardLine, { marginTop: passive ? 6 : 12 }]}>
+        <CoinImg size={passive ? 16 : 20} />
+        <Arcade size={passive ? 13 : 15} spacing={0} color={C.gold}>
+          +{unlock.coins} moedas
+        </Arcade>
+      </View>
+      <Actions>
+        <PxButton variant="gold" block onPress={onClose} testID="modal-ok">
+          Oba!
+        </PxButton>
+      </Actions>
+    </ModalCard>
+  );
+}
+
+function tierColor(item: AchievementCardItem): string {
+  if (item.complete) return C.mint;
+  if (item.unlockedTiers === 0) return C.muted;
+  const ratio = item.unlockedTiers / item.totalTiers;
+  if (ratio >= 0.7) return C.gold;
+  if (ratio >= 0.35) return '#dfe3f0';
+  return '#e8955a';
+}
+
+function AchievementsModal({ onClose }: { onClose: () => void }) {
+  const totals = useGame((s) => s.totals);
+  const cities = useGame((s) => s.cities);
+  const captures = useGame((s) => s.captures);
+  const activities = useGame((s) => s.activities);
+  const live = useGame((s) => s.live);
+  const achievements = useGame((s) => s.achievements);
+  const [filter, setFilter] = useState<'all' | AchievementCategory>('all');
+
+  const overview = buildAchievementOverview({ totals, cities, captures, activities, live, achievements });
+  const visible = filter === 'all' ? overview.items : overview.items.filter((it) => it.category === filter);
+
+  return (
+    <ModalCard testID="modal-achievements">
+      <Title>CONQUISTAS</Title>
+      <View style={styles.achStatsRow}>
+        <Chip>
+          <Icon name="trophy" size={14} color={C.gold} accent={C.cream} /> {overview.unlockedCount} desbloqueadas
+        </Chip>
+        <Chip>
+          <CoinImg size={14} /> {overview.totalCoinsEarned.toLocaleString('pt-BR')} ganhas
+        </Chip>
+      </View>
+      <View style={styles.achFilters}>
+        <PxButton
+          size="small"
+          variant={filter === 'all' ? 'gold' : 'default'}
+          onPress={() => {
+            sfx.click();
+            setFilter('all');
+          }}
+        >
+          Todas
+        </PxButton>
+        {ACHIEVEMENT_CATEGORIES.map((cat) => (
+          <PxButton
+            key={cat.id}
+            size="small"
+            variant={filter === cat.id ? 'gold' : 'default'}
+            onPress={() => {
+              sfx.click();
+              setFilter(cat.id);
+            }}
+          >
+            {cat.label}
+          </PxButton>
+        ))}
+      </View>
+      <View style={styles.achList}>
+        {visible.length === 0 ? (
+          <Muted align="center" style={{ paddingVertical: 14 }}>
+            Nenhuma conquista nesta categoria ainda.
+          </Muted>
+        ) : (
+          visible.map((it) => {
+            const accent = tierColor(it);
+            return (
+              <PxCell key={it.id} style={styles.achItem}>
+                <View style={styles.achItemTop}>
+                  <Icon
+                    name={it.icon}
+                    size={24}
+                    color={it.unlockedTiers > 0 || it.complete ? accent : C.muted}
+                    accent={it.complete ? C.cream : C.gold}
+                  />
+                  <View style={styles.achItemBody}>
+                    <View style={styles.achTitleRow}>
+                      <Txt weight={700} size={15} style={styles.achShrink} numberOfLines={1}>
+                        {it.title}
+                      </Txt>
+                      {it.recurring === 'monthly' && (
+                        <Txt size={10} weight={700} color={C.sky} upper>
+                          MENSAL
+                        </Txt>
+                      )}
+                      {it.recurring === 'city' && (
+                        <Txt size={10} weight={700} color={C.mint} upper>
+                          CIDADE
+                        </Txt>
+                      )}
+                    </View>
+                    <Muted size={12}>{it.description}</Muted>
+                  </View>
+                  {it.nextCoins != null ? (
+                    <View style={styles.achCoinPill}>
+                      <CoinImg size={13} />
+                      <Arcade size={9} spacing={0} color={C.gold}>
+                        +{it.nextCoins}
+                      </Arcade>
+                    </View>
+                  ) : (
+                    <Arcade size={9} spacing={0} color={C.mint}>
+                      OK
+                    </Arcade>
+                  )}
+                </View>
+                <Bar percent={it.percent} variant={it.complete ? 'mint' : 'gold'} height={9} />
+                <View style={styles.achMetaRow}>
+                  <Muted size={12}>{it.progressLabel}</Muted>
+                  <Txt size={12} weight={700} color={accent}>
+                    {it.complete ? 'Completa' : `Nível ${it.unlockedTiers}/${it.totalTiers}`}
+                  </Txt>
+                </View>
+              </PxCell>
+            );
+          })
+        )}
+      </View>
+      <Actions>
+        <PxButton block onPress={onClose} testID="modal-ok">
+          Fechar
         </PxButton>
       </Actions>
     </ModalCard>
@@ -408,88 +581,34 @@ function SummaryCell({ label, value, coin, color }: { label: string; value: stri
   );
 }
 
-function CharactersModal({ onClose }: { onClose: () => void }) {
+function AvatarEditorModal({ onClose }: { onClose: () => void }) {
   const profile = useGame((s) => s.profile);
-  const unlocked = useGame((s) => s.unlocked);
-  const wallet = useGame((s) => s.wallet);
-  if (!profile) return null;
-  const { setCharacter, unlockCharacter, toast } = useGame.getState();
-  const choose = (id: string) => {
-    const c = CHARACTERS.find((d) => d.id === id);
-    if (!c) return;
-    if (unlocked.includes(c.id)) {
-      sfx.click();
-      setCharacter(c.id);
-    } else if (unlockCharacter(c.id)) {
-      sfx.capture();
-      setCharacter(c.id);
-      toast(`${c.name} desbloqueado!`, 'city');
-    } else {
-      sfx.warn();
-      toast(`Faltam ${c.price - wallet} moedas para ${c.name}.`, 'warn');
-    }
+  const [draft, setDraft] = useState<AvatarConfig | null>(() => (profile ? resolveAvatar(profile) : null));
+  if (!profile || !draft) return null;
+
+  const save = () => {
+    const { setAvatar, toast } = useGame.getState();
+    setAvatar(draft);
+    sfx.capture();
+    toast('Avatar atualizado!', 'info');
+    onClose();
   };
-  // `.char-grid`: 3 colunas; cada linha estica as células até a mais alta
-  const rows: (typeof CHARACTERS)[] = [];
-  for (let i = 0; i < CHARACTERS.length; i += 3) rows.push(CHARACTERS.slice(i, i + 3));
+
   return (
-    <ModalCard testID="modal-characters">
-      <Title>HERÓIS</Title>
-      <View style={styles.walletLine}>
-        <Muted>Você tem</Muted>
-        <CoinImg size={14} style={styles.walletCoin} />
-        <Muted>{wallet} moedas.</Muted>
-      </View>
-      <View style={styles.charGrid}>
-        {rows.map((row, i) => (
-          <View key={i} style={styles.charRow}>
-            {row.map((c) => {
-              const owned = unlocked.includes(c.id);
-              const selected = profile.characterId === c.id;
-              return (
-                <Pressable
-                  key={c.id}
-                  onPress={() => choose(c.id)}
-                  style={styles.charCell}
-                  accessibilityRole="button"
-                  accessibilityLabel={owned ? c.name : `${c.name}, ${c.price} moedas`}
-                  accessibilityState={{ selected }}
-                  testID={`char-${c.id}`}
-                >
-                  {selected ? (
-                    <View style={styles.charSelected} />
-                  ) : (
-                    <Inset side="bottom" h={3} color="rgba(0, 0, 0, 0.25)" />
-                  )}
-                  <CharacterSprite
-                    characterId={c.id}
-                    modality={profile.modality}
-                    facing="down"
-                    animate={selected}
-                    width={60}
-                  />
-                  <Txt weight={700}>{c.name}</Txt>
-                  {owned ? (
-                    <Muted size={12}>{selected ? 'em uso' : 'liberado'}</Muted>
-                  ) : (
-                    <View style={styles.price}>
-                      <CoinImg size={12} />
-                      <Arcade size={9} spacing={0} color={C.gold}>
-                        {c.price}
-                      </Arcade>
-                    </View>
-                  )}
-                  {!owned && <Icon name="lock" size={16} style={styles.charLock} />}
-                </Pressable>
-              );
-            })}
-          </View>
-        ))}
+    <ModalCard testID="modal-avatar">
+      <Title>EDITAR AVATAR</Title>
+      <View style={styles.avatarEditor}>
+        <AvatarCustomizer value={draft} onChange={setDraft} modality={profile.modality} compact />
       </View>
       <Actions>
-        <PxButton block onPress={onClose} testID="modal-ok">
-          Fechar
-        </PxButton>
+        <View style={styles.avatarActions}>
+          <PxButton onPress={onClose} style={styles.avatarActionBtn} testID="avatar-cancel">
+            Cancelar
+          </PxButton>
+          <PxButton variant="gold" onPress={save} style={styles.avatarActionBtn} testID="avatar-save">
+            Salvar
+          </PxButton>
+        </View>
       </Actions>
     </ModalCard>
   );
@@ -505,8 +624,9 @@ export function ModalHost() {
   const setTab = useGame((s) => s.setTab);
   const recording = useGame((s) => s.live?.status === 'recording');
   const queued = useGame((s) => s.modals.length);
-  // Pedalando/correndo ninguém deve precisar tocar na tela: capturas e níveis somem sozinhos.
-  const passive = recording && (modal?.type === 'capture' || modal?.type === 'levelup');
+  // Pedalando/correndo ninguém deve precisar tocar na tela: capturas, níveis e conquistas somem sozinhos.
+  const passive =
+    recording && (modal?.type === 'capture' || modal?.type === 'levelup' || modal?.type === 'achievement');
   useEffect(() => {
     if (!passive) return;
     // com fila (várias capturas de uma vez) cada cartão fica menos tempo
@@ -535,8 +655,10 @@ export function ModalHost() {
       <Backdrop passive={passive} onClose={close}>
         {modal.type === 'capture' && <CaptureModal capture={modal.capture} xp={modal.xp} onClose={close} />}
         {modal.type === 'levelup' && <LevelUpModal level={modal.level} title={modal.title} onClose={close} />}
+        {modal.type === 'achievement' && <AchievementUnlockModal unlock={modal.unlock} onClose={close} />}
+        {modal.type === 'achievements' && <AchievementsModal onClose={close} />}
         {modal.type === 'summary' && <SummaryModal activity={modal.activity} onClose={close} />}
-        {modal.type === 'characters' && <CharactersModal onClose={close} />}
+        {modal.type === 'avatar' && <AvatarEditorModal onClose={close} />}
       </Backdrop>
     </PassiveCtx.Provider>
   );
@@ -572,20 +694,18 @@ const styles = StyleSheet.create({
   caught: { marginTop: 14 },
   caughtList: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   caughtItem: { paddingBottom: 5.6 },
-  walletLine: { flexDirection: 'row', justifyContent: 'center', alignItems: 'baseline', marginTop: 6 },
-  walletCoin: { marginHorizontal: 16 * 0.2 },
-  charGrid: { marginTop: 12, gap: 10 },
-  charRow: { flexDirection: 'row', gap: 10 },
-  charCell: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 4,
-    paddingTop: 10,
-    paddingHorizontal: 4,
-    paddingBottom: 8,
-    backgroundColor: C.panel2,
-  },
-  charSelected: { ...FILL, borderWidth: 3, borderColor: C.gold, pointerEvents: 'none' } as ViewStyle,
-  price: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  charLock: { position: 'absolute', top: 6, right: 6 },
+  avatarEditor: { marginTop: 12 },
+  avatarActions: { flexDirection: 'row', gap: 10 },
+  avatarActionBtn: { flex: 1 },
+  achRewardLine: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  achStatsRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8, marginTop: 10 },
+  achFilters: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 },
+  achList: { marginTop: 12, gap: 8 },
+  achItem: { gap: 6, paddingVertical: 10, paddingHorizontal: 12 },
+  achItemTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  achItemBody: { flex: 1, minWidth: 0 },
+  achTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  achShrink: { flexShrink: 1 },
+  achCoinPill: { flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 0 },
+  achMetaRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
 });

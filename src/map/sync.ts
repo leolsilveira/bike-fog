@@ -14,6 +14,7 @@ import { onTrack } from '../game/tracker.ts';
 import { updateViewTiles } from '../game/tiles.ts';
 import type { Poi } from '../game/types.ts';
 import { mapController } from './controller.ts';
+import { resolveAvatar } from '../sprites/avatar.ts';
 import { RARITY_INFO } from '../sprites/items.ts';
 
 /** Reset grande de células vai em pedaços (o mapa não anima os pedaços que chegam em seguida). */
@@ -49,7 +50,9 @@ function liveStatus(s: GameState): LiveStatus {
 }
 
 function profileOf(s: GameState): Extract<HostToMap, { type: 'init' }>['profile'] {
-  return s.profile ? { characterId: s.profile.characterId, modality: s.profile.modality } : null;
+  return s.profile
+    ? { characterId: s.profile.characterId, avatar: resolveAvatar(s.profile), modality: s.profile.modality }
+    : null;
 }
 
 /** Onde o jogador está sendo desenhado (telemetria do mapa) ou, sem ela, o último fix. */
@@ -328,8 +331,13 @@ export function startMapSync(): void {
       mapHost.send({ type: 'mode', mode: s.tab, live: liveStatus(s) });
     }
     const p = s.profile;
-    if (p && (p.characterId !== prev.profile?.characterId || p.modality !== prev.profile?.modality)) {
-      mapHost.send({ type: 'profile', characterId: p.characterId, modality: p.modality });
+    if (
+      p &&
+      (p.characterId !== prev.profile?.characterId ||
+        p.avatar !== prev.profile?.avatar ||
+        p.modality !== prev.profile?.modality)
+    ) {
+      mapHost.send({ type: 'profile', characterId: p.characterId, avatar: resolveAvatar(p), modality: p.modality });
     }
     if (s.fix !== prev.fix) requestPois();
   });

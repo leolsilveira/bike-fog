@@ -9,6 +9,7 @@ import {
 import {
   characterById, characterFrame, FRAME_H, FRAME_W, frameCount, type Facing, type Modality,
 } from '../../sprites/characters.ts';
+import { avatarFrame, avatarKey, type AvatarConfig } from '../../sprites/avatar.ts';
 import type { Raster } from '../../sprites/pixel.ts';
 import { rasterUri } from '../rasterImage.ts';
 import { C } from '../theme.ts';
@@ -123,7 +124,8 @@ export function PoiIconImg({ category, size = 24, style }: ImgProps & { category
  * não pisca (trocar o `source` de um Image recarrega e pode deixar um quadro em branco).
  */
 export function CharacterSprite({
-  characterId,
+  characterId = 'lia',
+  avatar,
   modality,
   facing = 'down',
   animate = true,
@@ -131,7 +133,8 @@ export function CharacterSprite({
   width = 48,
   style,
 }: {
-  characterId: string;
+  characterId?: string;
+  avatar?: AvatarConfig;
   modality: Modality;
   facing?: Facing;
   animate?: boolean;
@@ -141,19 +144,20 @@ export function CharacterSprite({
 }) {
   const n = animate ? frameCount(modality) : 1;
   const [frame, setFrame] = useState(0);
+  const spriteId = avatar ? `custom:${avatarKey(avatar)}` : characterById(characterId).id;
   useEffect(() => {
     if (!animate) return;
     const count = frameCount(modality);
     const id = setInterval(() => setFrame((f) => (f + 1) % count), 1000 / (fps ?? (modality === 'run' ? 8 : 6)));
-    // volta ao primeiro quadro ao parar ou ao trocar de herói/pose
+    // volta ao primeiro quadro ao parar ou ao trocar de modalidade/direção
     return () => {
       clearInterval(id);
       setFrame(0);
     };
-  }, [characterId, modality, facing, animate, fps]);
+  }, [modality, facing, animate, fps]);
 
   const height = Math.round((width * FRAME_H) / FRAME_W);
-  const def = characterById(characterId);
+  const def = avatar ? null : characterById(characterId);
   const frames: number[] = animate ? Array.from({ length: n }, (_, i) => i) : [-1];
   const current = Math.min(frame, n - 1);
   return (
@@ -161,8 +165,8 @@ export function CharacterSprite({
       {frames.map((f, i) => (
         <PixelImage
           key={f}
-          rasterKey={`char:${def.id}:${modality}:${facing}:${f}`}
-          make={() => characterFrame(def, modality, facing, f)}
+          rasterKey={`char:${spriteId}:${modality}:${facing}:${f}`}
+          make={() => (avatar ? avatarFrame(avatar, modality, facing, f) : characterFrame(def!, modality, facing, f))}
           width={width}
           height={height}
           style={styles.stack}

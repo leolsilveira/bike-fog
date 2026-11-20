@@ -34,6 +34,7 @@ export async function hydrate(keepRecording = false): Promise<void> {
       useGame.setState({
         ...DEFAULT_PERSISTED,
         ...saved,
+        achievements: saved.achievements ?? {},
         live,
         settings: { ...DEFAULT_PERSISTED.settings, ...saved.settings },
       });
@@ -113,7 +114,8 @@ export function startAutosave(onBackground?: () => void): void {
     if (
       s.profile !== prev.profile || s.wallet !== prev.wallet || s.xp !== prev.xp || s.totals !== prev.totals ||
       s.captures !== prev.captures || s.cities !== prev.cities || s.activities !== prev.activities ||
-      s.settings !== prev.settings || s.coins !== prev.coins || s.live !== prev.live || s.unlocked !== prev.unlocked
+      s.achievements !== prev.achievements || s.settings !== prev.settings || s.coins !== prev.coins ||
+      s.live !== prev.live || s.unlocked !== prev.unlocked
     ) {
       scheduleSave();
     }

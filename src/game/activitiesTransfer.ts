@@ -2,6 +2,7 @@
 // Atividades importadas revelam a névoa no mapa e entram no histórico/totais, mas NÃO dão XP/nível.
 import { strToU8, zipSync } from 'fflate';
 import { pickActivityFile, shareZip } from '../services/fileTransfer';
+import { checkAndGrantAchievements } from './achievements.ts';
 import { bumpCityCells, cityAtSync, ensureCityAt } from './cities.ts';
 import { GAME_NAME, REVEAL_RADIUS_M } from './config.ts';
 import { fog } from './fog.ts';
@@ -230,6 +231,9 @@ export async function importActivitiesFromFile(opts?: {
       cells: st.totals.cells + allAddedCells.length,
     },
   });
+
+  // Conquistas avaliam também o histórico importado (sem mexer em XP/nível).
+  checkAndGrantAchievements({ batchToast: true });
 
   await saveNow();
   onProgress?.({ percent: 100, label: 'Concluído!' });

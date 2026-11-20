@@ -1,12 +1,15 @@
+import type { AvatarConfig } from '../sprites/avatar.ts';
 import type { Modality } from '../sprites/characters.ts';
+import type { IconName } from '../sprites/icons.ts';
 import type { CoinKind, PoiCategory, Rarity } from '../sprites/items.ts';
 import type { BBox, LngLat } from './geo.ts';
 
-export type { Modality, CoinKind, PoiCategory, Rarity, LngLat };
+export type { AvatarConfig, Modality, CoinKind, PoiCategory, Rarity, LngLat };
 
 export interface Profile {
   name: string;
   characterId: string;
+  avatar?: AvatarConfig;
   modality: Modality;
   createdAt: number;
 }
@@ -101,15 +104,43 @@ export interface PlayerFix extends LngLat {
 
 export type GpsStatus = 'off' | 'searching' | 'ok' | 'weak' | 'denied' | 'unavailable' | 'sim';
 
+export type AchievementCategory =
+  | 'exploration'
+  | 'cities'
+  | 'distance'
+  | 'collection'
+  | 'consistency'
+  | 'special';
+
+export interface AchievementRecord {
+  /** Momento em que foi desbloqueada (ms). */
+  at: number;
+  /** Moedas concedidas no desbloqueio. */
+  coins: number;
+}
+
+export interface AchievementUnlockEvent {
+  key: string;
+  title: string;
+  subtitle: string;
+  coins: number;
+  category: AchievementCategory;
+  icon: IconName;
+  tier?: number;
+  maxTier?: number;
+}
+
 export interface Toast {
   id: number;
   text: string;
-  kind: 'coin' | 'info' | 'warn' | 'city' | 'xp';
+  kind: 'coin' | 'info' | 'warn' | 'city' | 'xp' | 'achievement';
   coinKind?: CoinKind;
 }
 
 export type Modal =
   | { type: 'capture'; capture: Capture; xp: number }
   | { type: 'levelup'; level: number; title: string }
+  | { type: 'achievement'; unlock: AchievementUnlockEvent }
+  | { type: 'achievements' }
   | { type: 'summary'; activity: ActivitySummary }
-  | { type: 'characters' };
+  | { type: 'avatar' };
