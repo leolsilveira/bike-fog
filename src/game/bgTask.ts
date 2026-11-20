@@ -7,10 +7,10 @@ import { Platform } from 'react-native';
 
 export const BG_LOCATION_TASK = 'desbrava-bg-location';
 
-type Sink = (locations: Location.LocationObject[]) => void;
+type Sink = (locations: Location.LocationObject[]) => void | Promise<void>;
 
 let sink: Sink | null = null;
-let boot: (() => void) | null = null;
+let boot: (() => void | Promise<void>) | null = null;
 /** Posições que chegaram antes de o jogo iniciar (app aberto pelo sistema em segundo plano). */
 const pending: Location.LocationObject[] = [];
 const MAX_PENDING = 600;
@@ -23,22 +23,27 @@ TaskManager.defineTask<{ locations?: Location.LocationObject[] }>(BG_LOCATION_TA
   const locations = data?.locations ?? [];
   if (!locations.length) return;
   if (sink) {
-    sink(locations);
+    await sink(locations);
     return;
   }
   pending.push(...locations);
   if (pending.length > MAX_PENDING) pending.splice(0, pending.length - MAX_PENDING);
-  boot?.();
+  await boot?.();
 });
+
+/** Há posições de segundo plano esperando o jogo iniciar (app acordado pelo sistema no meio de uma atividade). */
+export function hasPendingBackgroundLocations(): boolean {
+  return pending.length > 0;
+}
 
 /** Quem processa as posições (location.ts). Entrega o que estava guardado. */
 export function setBackgroundSink(fn: Sink): void {
   sink = fn;
-  if (pending.length) fn(pending.splice(0));
+  if (pending.length) void fn(pending.splice(0));
 }
 
 /** Como iniciar o jogo se uma posição chegar sem ele estar rodando (game/index.ts registra initGame). */
-export function setBackgroundBoot(fn: () => void): void {
+export function setBackgroundBoot(fn: () => void | Promise<void>): void {
   boot = fn;
 }
 

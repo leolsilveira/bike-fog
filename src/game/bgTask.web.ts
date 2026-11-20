@@ -3,9 +3,13 @@ import type { LocationObject } from 'expo-location';
 
 export const BG_LOCATION_TASK = 'desbrava-bg-location';
 
-export function setBackgroundSink(_fn: (locations: LocationObject[]) => void): void {}
+export function hasPendingBackgroundLocations(): boolean {
+  return false;
+}
 
-export function setBackgroundBoot(_fn: () => void): void {}
+export function setBackgroundSink(_fn: (locations: LocationObject[]) => void | Promise<void>): void {}
+
+export function setBackgroundBoot(_fn: () => void | Promise<void>): void {}
 
 export interface BackgroundStart {
   supported: boolean;

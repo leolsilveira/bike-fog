@@ -113,7 +113,7 @@ function captureNear(a: LngLat, b: LngLat): void {
 
 function persistTrack(force = false): Promise<void> {
   const live = useGame.getState().live;
-  if (!live) return Promise.resolve();
+  if (!live || track.length === trackSavedLen) return Promise.resolve();
   if (force || track.length - trackSavedLen >= 60) {
     trackSavedLen = track.length;
     return saveTrack(live.id, track);

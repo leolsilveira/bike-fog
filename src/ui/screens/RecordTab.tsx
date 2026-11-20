@@ -7,6 +7,7 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { liveElapsed, useGame } from '../../game/store.ts';
 import { player } from '../../game/location.ts';
 import { finishAndSaveTrack, kickTracker } from '../../game/tracker.ts';
+import { saveNow } from '../../game/persist.ts';
 import { sfx } from '../../game/audio.ts';
 import { cellSizeM, formatArea, formatDistance, formatDuration, formatPace, formatSpeed } from '../../game/geo.ts';
 import type { GpsStatus } from '../../game/types.ts';
@@ -91,6 +92,7 @@ export function RecordTab() {
     sfx.stop();
     await finishAndSaveTrack();
     finishActivity();
+    await saveNow();
   };
 
   const top = { top: 10 + safeT };

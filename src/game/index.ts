@@ -2,10 +2,10 @@
 import { hydrate, startAutosave } from './persist.ts';
 import { loadCityPolygons } from './cities.ts';
 import { initLocation, player } from './location.ts';
-import { onActivityChange, restoreLiveTrack } from './tracker.ts';
+import { finishAndSaveTrack, onActivityChange, restoreLiveTrack } from './tracker.ts';
 import { initAudio } from './audio.ts';
 import { updateTiles } from './tiles.ts';
-import { setBackgroundBoot } from './bgTask';
+import { hasPendingBackgroundLocations, setBackgroundBoot } from './bgTask';
 import { fog } from './fog.ts';
 import { pois } from './pois.ts';
 import { useGame } from './store.ts';
@@ -17,10 +17,10 @@ let started: Promise<void> | null = null;
 export function initGame(): Promise<void> {
   if (started) return started;
   started = (async () => {
-    await hydrate();
+    await hydrate(hasPendingBackgroundLocations());
     await loadCityPolygons();
     await restoreLiveTrack();
-    startAutosave();
+    startAutosave(() => void finishAndSaveTrack());
     initAudio();
 
     // POIs e ruas vêm dos vector tiles em volta do jogador
@@ -54,4 +54,4 @@ export function initGame(): Promise<void> {
 }
 
 // Uma posição de segundo plano chegou com o jogo parado (o sistema abriu o app sem a interface).
-setBackgroundBoot(() => void initGame());
+setBackgroundBoot(() => initGame());

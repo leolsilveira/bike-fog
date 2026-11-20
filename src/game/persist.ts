@@ -20,14 +20,17 @@ let legacyCells = false;
 let flushing: Promise<void> | null = null;
 let flushAgain = false;
 
-export async function hydrate(): Promise<void> {
+export async function hydrate(keepRecording = false): Promise<void> {
   try {
     const [saved, fogBytes] = await Promise.all([
       storage.getJson<PersistedState>(SAVE_KEY),
       storage.getBytes(FOG_KEY),
     ]);
     if (saved && saved.version === 1) {
-      const live = saved.live ? { ...saved.live, status: 'paused' as const, resumedAt: null } : null;
+      const live =
+        saved.live && !(keepRecording && saved.live.status === 'recording')
+          ? { ...saved.live, status: 'paused' as const, resumedAt: null }
+          : saved.live;
       useGame.setState({
         ...DEFAULT_PERSISTED,
         ...saved,
@@ -104,7 +107,7 @@ export function saveNow(): Promise<void> {
   return flush();
 }
 
-export function startAutosave(): void {
+export function startAutosave(onBackground?: () => void): void {
   useGame.subscribe((s, prev) => {
     if (!s.hydrated) return;
     if (
@@ -121,7 +124,10 @@ export function startAutosave(): void {
   });
   // No celular o app pode ser morto a qualquer momento depois de sair da tela: salva na saída.
   AppState.addEventListener('change', (state) => {
-    if (state !== 'active') void saveNow();
+    if (state !== 'active') {
+      onBackground?.();
+      void saveNow();
+    }
   });
 }
 
