@@ -24,6 +24,8 @@ let last: PlayerFix | null = null;
 let track: number[] = [];
 let trackSavedLen = 0;
 let distXpAcc = 0;
+/** XP de células é fracionário (0,1–0,2 por célula): acumula até fechar um ponto. */
+let cellXpAcc = 0;
 /** Substitui a fonte de ruas (testes). Padrão: ruas dos tiles carregados por tiles.ts. */
 let roadSampler: RoadSampler | null = null;
 /** Spawn em andamento (esperando os tiles): evita lotes duplicados. */
@@ -208,7 +210,10 @@ function revealAndCollect(a: PlayerFix, b: PlayerFix): void {
       live: { ...live, newCells: live.newCells + added.length, cityIds },
       totals: { ...st.totals, cells: st.totals.cells + added.length },
     });
-    useGame.getState().addXp(added.length * XP.perCell);
+    cellXpAcc += added.length * XP.perCell[live.modality];
+    const cellXp = Math.floor(cellXpAcc);
+    cellXpAcc -= cellXp;
+    if (cellXp) useGame.getState().addXp(cellXp);
   }
   const gotCoin = collectNear(a, b);
   const gotPoi = captureNear(a, b);
@@ -236,6 +241,7 @@ export function onActivityChange(): void {
     track = [];
     trackSavedLen = 0;
     distXpAcc = 0;
+    cellXpAcc = 0;
     emitTrack();
     useGame.setState({ speedWarning: false });
   }

@@ -115,7 +115,7 @@ export function startAutosave(onBackground?: () => void): void {
       s.profile !== prev.profile || s.wallet !== prev.wallet || s.xp !== prev.xp || s.totals !== prev.totals ||
       s.captures !== prev.captures || s.cities !== prev.cities || s.activities !== prev.activities ||
       s.achievements !== prev.achievements || s.settings !== prev.settings || s.coins !== prev.coins ||
-      s.live !== prev.live || s.unlocked !== prev.unlocked
+      s.live !== prev.live || s.unlocked !== prev.unlocked || s.route !== prev.route
     ) {
       scheduleSave();
     }

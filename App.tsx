@@ -13,10 +13,12 @@ import { MapView } from './src/map/MapView';
 import { TitleScreen } from './src/ui/screens/TitleScreen.tsx';
 import { CreateScreen } from './src/ui/screens/CreateScreen.tsx';
 import { MapTab } from './src/ui/screens/MapTab.tsx';
-import { RecordTab } from './src/ui/screens/RecordTab.tsx';
+import { RideScreen } from './src/ui/screens/RideScreen.tsx';
 import { StatsScreen } from './src/ui/screens/StatsScreen.tsx';
 import { PoiCard, SimPad, SpeedBanner, TabBar, Toasts } from './src/ui/components/Hud.tsx';
 import { ModalHost } from './src/ui/components/Modals.tsx';
+import { StartSheet } from './src/ui/components/StartSheet.tsx';
+import { useKeepAwakeWhile } from './src/ui/keepAwake.ts';
 import { Arcade } from './src/ui/components/Px.tsx';
 import { Gallery } from './src/ui/Gallery.tsx';
 import { C, FILL, FONT_SOURCES } from './src/ui/theme.ts';
@@ -39,21 +41,21 @@ function Layer({ z, children }: { z: number; children: ReactNode }) {
 
 /**
  * Jogo: mapa por trás e, por cima, a aba atual, aviso de velocidade, joystick, cartão de POI e abas.
- * Os zIndex repetem os do CSS original (abas 10, stats 15, joystick 12, aviso 15, barra 20, cartão 30).
+ * Na aba Mapa com atividade em andamento entra a tela da atividade (câmera inclinada + HUD) no lugar do Mapa.
+ * Os zIndex repetem os do CSS original (abas 10, stats 15, joystick 12, aviso 15, barra 20, folha 25, cartão 30).
  */
 function Game() {
   const tab = useGame((s) => s.tab);
+  const live = useGame((s) => s.live != null);
+  const planning = useGame((s) => s.planning);
+  // tela acesa gravando, em qualquer aba
+  useKeepAwakeWhile(useGame((s) => s.live?.status === 'recording'));
   return (
     <View style={styles.layer}>
       <MapView />
       {tab === 'map' && (
         <Layer z={10}>
-          <MapTab />
-        </Layer>
-      )}
-      {tab === 'record' && (
-        <Layer z={10}>
-          <RecordTab />
+          {live ? <RideScreen /> : <MapTab hideNearby={planning} />}
         </Layer>
       )}
       {tab === 'stats' && (
@@ -64,6 +66,7 @@ function Game() {
       <SpeedBanner />
       <SimPad />
       {tab !== 'stats' && <PoiCard />}
+      {planning && <StartSheet />}
       <TabBar />
     </View>
   );

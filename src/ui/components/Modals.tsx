@@ -23,6 +23,7 @@ import type { AchievementCategory, AchievementUnlockEvent, ActivitySummary, Capt
 import { AvatarCustomizer } from './AvatarCustomizer.tsx';
 import { BadgeImg, CharacterSprite, CoinImg, Icon } from './Sprites.tsx';
 import { Arcade, Bar, Chip, Muted, PxBox, PxButton, PxCell, Txt } from './Px.tsx';
+import { useOverlayTop } from './Hud.tsx';
 import { C, FILL, useSafe } from '../theme.ts';
 
 const useNativeDriver = Platform.OS !== 'web';
@@ -159,6 +160,7 @@ function ModalCard({ children, testID }: { children: ReactNode; testID: string }
 /** `.modal-backdrop`: escurece e centraliza (normal) ou só posiciona o cartão abaixo do HUD (passivo). */
 function Backdrop({ passive, onClose, children }: { passive: boolean; onClose: () => void; children: ReactNode }) {
   const { safeT, safeB } = useSafe();
+  const overlayTop = useOverlayTop();
   const [fade] = useState(() => new Animated.Value(0));
   useEffect(() => {
     // `fade 160ms ease`
@@ -182,7 +184,7 @@ function Backdrop({ passive, onClose, children }: { passive: boolean; onClose: (
         style={[
           styles.place,
           passive
-            ? { justifyContent: 'flex-start', paddingTop: 150 + safeT }
+            ? { justifyContent: 'flex-start', paddingTop: overlayTop }
             : { justifyContent: 'center', paddingTop: 20 + safe, paddingBottom: 20 + safe },
         ]}
       >

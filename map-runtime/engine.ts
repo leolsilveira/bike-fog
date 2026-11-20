@@ -2,7 +2,7 @@
 // Guarda uma cópia local do que precisa desenhar (modo, perfil, moedas, POIs, trilha, células);
 // nenhuma regra de jogo roda aqui.
 import { Map as MLMap, Marker, type GeoJSONSource, type LngLatLike } from 'maplibre-gl';
-import type { FeatureCollection, LineString, Point } from 'geojson';
+import type { Feature, FeatureCollection, LineString, Point } from 'geojson';
 import { buildStyle } from './style.ts';
 import { FogLayer } from './fogLayer.ts';
 import { registerImages } from './images.ts';
@@ -12,11 +12,11 @@ import {
 } from './player.ts';
 import { log, send } from './bridge.ts';
 import { PITCH, ZOOM } from '../src/game/config.ts';
-import { angleDiff, type LngLat } from '../src/game/geo.ts';
+import { angleDiff, haversine, type LngLat } from '../src/game/geo.ts';
 import { frameCount, type Facing } from '../src/sprites/characters.ts';
 import { avatarKey, resolveAvatar } from '../src/sprites/avatar.ts';
-import type { Coin, Modality, Tab } from '../src/game/types.ts';
-import type { HostToMap, LiveStatus, MapProfile, PoiMarker } from '../src/bridge/protocol.ts';
+import type { Coin, Modality } from '../src/game/types.ts';
+import type { CameraMode, HostToMap, LiveStatus, MapProfile, PoiMarker } from '../src/bridge/protocol.ts';
 
 type InitMsg = Extract<HostToMap, { type: 'init' }>;
 type CameraMsg = Extract<HostToMap, { type: 'camera' }>;
@@ -34,6 +34,29 @@ const LONG_PRESS_MS = 600;
 const LONG_PRESS_SLOP_PX = 10;
 /** Telemetria da posição exibida para o host. */
 const TELEMETRY_MS = 250;
+/** Escala dos sprites (POIs e moedas) por zoom: pares [zoom, icon-size], interpolação linear. */
+const SPRITE_SIZE_STOPS: [number, number][] = [[13, 0.32], [16, 0.6], [18.5, 0.95]];
+/**
+ * Largura do herói em px por unidade de `icon-size`: ele cresce e encolhe junto com os POIs, em qualquer câmera.
+ * 85 dá os 48 px de sempre no zoom da aba Mapa (15,6).
+ */
+const HERO_PX_PER_SIZE = 85;
+const HERO_ASPECT = 60 / 48;
+/** Trecho da rota logo à frente, pintado de verde com setas (m). */
+const ROUTE_NEXT_M = 400;
+
+function spriteSizeAt(zoom: number): number {
+  const stops = SPRITE_SIZE_STOPS;
+  if (zoom <= stops[0][0]) return stops[0][1];
+  for (let i = 1; i < stops.length; i++) {
+    const [z1, v1] = stops[i];
+    if (zoom <= z1) {
+      const [z0, v0] = stops[i - 1];
+      return v0 + ((zoom - z0) / (z1 - z0)) * (v1 - v0);
+    }
+  }
+  return stops[stops.length - 1][1];
+}
 
 export class Engine {
   map: MLMap | null = null;
@@ -44,17 +67,22 @@ export class Engine {
   private marker: Marker | null = null;
   private spriteCanvas: HTMLCanvasElement | null = null;
   private spriteKey = '';
-  private markerScale = '';
+  private heroWidth = 0;
+  private northUp = false;
   private loaded = false;
 
   // estado espelhado do host
-  private mode: Tab = 'record';
+  private mode: CameraMode = 'map';
   private live: LiveStatus = 'none';
   private profile: Profile | null = null;
   private home: LngLat = { lng: 0, lat: 0 };
   private coins: Coin[] = [];
   private pois: PoiMarker[] = [];
   private track: number[][] = [];
+  private route: { coords: number[]; dest: LngLat } | null = null;
+  /** Metros da rota já percorridos (host) e distâncias acumuladas do trajeto atual. */
+  private routeDone = 0;
+  private routeCum: { coords: number[]; cum: number[] } | null = null;
   /** Comandos de câmera que chegaram antes do estilo carregar. */
   private pendingCamera: CameraMsg[] = [];
 
@@ -136,6 +164,14 @@ export class Engine {
         for (let i = 0; i + 1 < msg.coords.length; i += 2) this.track.push([msg.coords[i], msg.coords[i + 1]]);
         this.updateTrack();
         break;
+      case 'route':
+        this.route = msg.route;
+        this.updateRoute();
+        break;
+      case 'routeDone':
+        this.routeDone = msg.doneM;
+        this.updateRoute();
+        break;
       case 'gpsFix':
         setGpsTarget(msg.fix);
         break;
@@ -179,13 +215,13 @@ export class Engine {
   // ---------------------------------------------------------------------------
   private mount(): void {
     const start = this.home;
-    const record = this.mode === 'record';
+    const ride = this.mode === 'ride';
     const map = new MLMap({
       container: this.container,
       style: buildStyle(),
       center: [start.lng, start.lat],
-      zoom: record ? ZOOM.record : ZOOM.map,
-      pitch: record ? PITCH.record : PITCH.map,
+      zoom: ride ? ZOOM.record : ZOOM.map,
+      pitch: ride ? PITCH.record : PITCH.map,
       maxPitch: 72,
       attributionControl: { compact: true },
       canvasContextAttributes: { antialias: true },
@@ -208,7 +244,7 @@ export class Engine {
     // seguindo o jogador há um `moveend` por quadro: a área visível vai para o host no máximo 2x/s
     map.on('moveend', () => this.scheduleView());
     map.on('rotatestart', (e) => {
-      if (e.originalEvent && this.mode === 'record') this.setFollowing(false);
+      if (e.originalEvent && this.mode === 'ride') this.setFollowing(false);
     });
     map.on('zoomstart', (e) => {
       if (e.originalEvent) this.interacting = true;
@@ -238,7 +274,6 @@ export class Engine {
   private createMarker(start: LngLat): void {
     const el = document.createElement('div');
     el.className = 'player-marker';
-    el.classList.toggle('is-record', this.mode === 'record');
     const body = document.createElement('div');
     body.className = 'player-body';
     const shadow = document.createElement('div');
@@ -347,6 +382,7 @@ export class Engine {
     map.addSource('game-track', { type: 'geojson', data: EMPTY });
     map.addSource('game-pois', { type: 'geojson', data: EMPTY });
     map.addSource('game-coins', { type: 'geojson', data: EMPTY });
+    map.addSource('game-route', { type: 'geojson', data: EMPTY });
 
     map.addLayer(
       {
@@ -378,6 +414,83 @@ export class Engine {
     );
 
     map.addLayer(this.fogLayer);
+    // rota planejada por cima da névoa: o caminho costuma passar justamente por onde ainda não se explorou
+    map.addLayer({
+      id: 'route-casing',
+      type: 'line',
+      source: 'game-route',
+      filter: ['==', ['geometry-type'], 'LineString'],
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#1d1730',
+        'line-opacity': 0.7,
+        'line-width': ['interpolate', ['linear'], ['zoom'], 13, 5, 18, 14],
+      },
+    });
+    // já percorrido: cinza; o resto: dourado tracejado; o próximo trecho: verde com setas no sentido da rota
+    map.addLayer({
+      id: 'route-done',
+      type: 'line',
+      source: 'game-route',
+      filter: ['==', ['get', 'part'], 'done'],
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#8f86a8',
+        'line-opacity': 0.85,
+        'line-width': ['interpolate', ['linear'], ['zoom'], 13, 2.5, 18, 8],
+      },
+    });
+    map.addLayer({
+      id: 'route-line',
+      type: 'line',
+      source: 'game-route',
+      filter: ['==', ['get', 'part'], 'rest'],
+      layout: { 'line-cap': 'butt', 'line-join': 'round' },
+      paint: {
+        'line-color': '#ffc63d',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 13, 2.5, 18, 8],
+        'line-dasharray': [2, 1.2],
+      },
+    });
+    map.addLayer({
+      id: 'route-next',
+      type: 'line',
+      source: 'game-route',
+      filter: ['==', ['get', 'part'], 'next'],
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#3fd3a0',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 13, 3.5, 18, 11],
+      },
+    });
+    map.addLayer({
+      id: 'route-arrows',
+      type: 'symbol',
+      source: 'game-route',
+      filter: ['==', ['get', 'part'], 'next'],
+      layout: {
+        'symbol-placement': 'line',
+        'symbol-spacing': 90,
+        'icon-image': 'route-arrow',
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 13, 0.5, 18, 1.1],
+        'icon-allow-overlap': true,
+        'icon-ignore-placement': true,
+        'icon-rotation-alignment': 'map',
+        'icon-pitch-alignment': 'map',
+      },
+    });
+    map.addLayer({
+      id: 'route-dest',
+      type: 'circle',
+      source: 'game-route',
+      filter: ['==', ['geometry-type'], 'Point'],
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 5, 18, 11],
+        'circle-color': '#ffc63d',
+        'circle-stroke-color': '#1d1730',
+        'circle-stroke-width': 3,
+      },
+    });
     map.addLayer(
       {
         id: 'poi-halo',
@@ -395,7 +508,7 @@ export class Engine {
       },
       'fog',
     );
-    const spriteSize = ['interpolate', ['linear'], ['zoom'], 13, 0.32, 16, 0.6, 18.5, 0.95] as const;
+    const spriteSize = ['interpolate', ['linear'], ['zoom'], ...SPRITE_SIZE_STOPS.flat()];
     map.addLayer({
       id: 'poi-icon',
       type: 'symbol',
@@ -457,6 +570,7 @@ export class Engine {
 
     this.loaded = true;
     this.updateTrack();
+    this.updateRoute();
     this.updateCoins();
     this.updatePois();
     this.setMode(this.mode, true);
@@ -474,31 +588,35 @@ export class Engine {
     send({ type: 'following', following: v });
   }
 
-  private padding(mode: Tab) {
+  private padding(mode: CameraMode) {
     const h = this.map?.getContainer().clientHeight ?? 800;
-    return mode === 'record'
+    return mode === 'ride'
       ? { top: Math.round(h * 0.42), bottom: 0, left: 0, right: 0 }
       : { top: 0, bottom: 0, left: 0, right: 0 };
   }
 
-  private setMode(mode: Tab, instant = false): void {
+  private setMode(mode: CameraMode, instant = false): void {
+    // saiu da câmera de atividade (talvez passando pelas Stats): a próxima visão de cima volta o norte para cima
+    if (this.mode === 'ride' && mode !== 'ride') this.northUp = true;
     this.mode = mode;
-    this.marker?.getElement().classList.toggle('is-record', mode === 'record');
+    const ride = mode === 'ride';
     this.updateOverlays();
-    this.fogLayer.opacity = mode === 'record' ? 0.94 : 0.86;
+    this.fogLayer.opacity = ride ? 0.94 : 0.86;
     const map = this.map;
     // antes do estilo carregar só guarda o modo; o `load` aplica tudo de uma vez
     if (!map || !this.loaded) return;
     // na visão 3D os nomes poluem a frente do personagem
-    map.setLayoutProperty('poi-label', 'visibility', mode === 'record' ? 'none' : 'visible');
+    map.setLayoutProperty('poi-label', 'visibility', ride ? 'none' : 'visible');
     if (mode === 'stats') return;
     this.setFollowing(true);
+    const northUp = this.northUp && !ride;
+    if (!ride) this.northUp = false;
     const p = player.display;
     const opts = {
       center: (p ? [p.lng, p.lat] : map.getCenter()) as LngLatLike,
-      zoom: mode === 'record' ? ZOOM.record : ZOOM.map,
-      pitch: mode === 'record' ? PITCH.record : PITCH.map,
-      bearing: mode === 'record' ? this.camBearing : map.getBearing(),
+      zoom: ride ? ZOOM.record : ZOOM.map,
+      pitch: ride ? PITCH.record : PITCH.map,
+      bearing: ride ? this.camBearing : northUp ? 0 : map.getBearing(),
       padding: this.padding(mode),
     };
     if (instant) {
@@ -521,6 +639,32 @@ export class Engine {
         this.setFollowing(false);
         map.easeTo({ center: [msg.lng, msg.lat], zoom: Math.max(map.getZoom(), 16.3), duration: 700 });
         break;
+      case 'fit': {
+        // padding maior que a tela faz o MapLibre ignorar o enquadramento: encolhe proporcionalmente
+        const el = map.getContainer();
+        const pad = { ...msg.padding };
+        const fitAxis = (size: number, a: 'top' | 'left', b: 'bottom' | 'right') => {
+          const room = size - 100;
+          if (pad[a] + pad[b] > room) {
+            const k = Math.max(0, room) / (pad[a] + pad[b]);
+            pad[a] *= k;
+            pad[b] *= k;
+          }
+        };
+        fitAxis(el.clientHeight, 'top', 'bottom');
+        fitAxis(el.clientWidth, 'left', 'right');
+        this.setFollowing(false);
+        this.transitionUntil = performance.now() + 900;
+        map.fitBounds(
+          [
+            [msg.west, msg.south],
+            [msg.east, msg.north],
+          ],
+          // o cálculo do MapLibre ignora a inclinação: a prévia fica vista de cima (recentrar devolve o pitch)
+          { padding: pad, duration: 800, maxZoom: 17, bearing: map.getBearing(), pitch: 0 },
+        );
+        break;
+      }
       case 'zoomBy':
         // segurar o "seguir" durante a animação: o jumpTo de cada quadro interromperia o easeTo
         // (no original, os botões +/- não faziam nada enquanto a câmera seguia o jogador)
@@ -530,11 +674,11 @@ export class Engine {
     }
   }
 
-  /** Vinheta na aba gravar; tilt-shift só com atividade em andamento (gravando ou pausada). */
+  /** Vinheta e tilt-shift na câmera de atividade (gravando ou pausada). */
   private updateOverlays(): void {
-    const record = this.mode === 'record';
-    if (this.vignette) this.vignette.hidden = !record;
-    if (this.tiltshift) this.tiltshift.hidden = !(record && this.live !== 'none');
+    const ride = this.mode === 'ride';
+    if (this.vignette) this.vignette.hidden = !ride;
+    if (this.tiltshift) this.tiltshift.hidden = !(ride && this.live !== 'none');
   }
 
   // ---------------------------------------------------------------------------
@@ -569,7 +713,7 @@ export class Engine {
     this.lastT = t;
     if (document.visibilityState === 'hidden') return;
 
-    tickPlayer(dt, map.getBearing(), this.mode === 'record', this.profile?.modality ?? 'bike');
+    tickPlayer(dt, map.getBearing(), this.mode === 'ride', this.profile?.modality ?? 'bike');
     const p = player.display;
     if (!p) return;
 
@@ -583,24 +727,16 @@ export class Engine {
       this.marker.getElement().style.visibility = '';
     }
     this.updateSprite(map.getBearing());
+    this.updateHeroSize(map.getZoom());
 
-    if (this.mode === 'record' && player.speed > 0.3) {
+    if (this.mode === 'ride' && player.speed > 0.3) {
       this.camBearing =
         (this.camBearing + angleDiff(this.camBearing, player.heading) * Math.min(1, (dt / 1000) * 2.2) + 360) % 360;
     }
 
-    if (this.marker) {
-      const refZoom = this.mode === 'record' ? ZOOM.record : ZOOM.map;
-      const scale = Math.max(0.45, Math.min(1.15, Math.pow(1.22, map.getZoom() - refZoom))).toFixed(2);
-      if (scale !== this.markerScale) {
-        this.markerScale = scale;
-        this.marker.getElement().style.setProperty('--player-scale', scale);
-      }
-    }
-
     if (this.mode !== 'stats' && this.following && !this.interacting && !this.pressed && t > this.transitionUntil) {
-      if (this.mode === 'record') {
-        map.jumpTo({ center: [p.lng, p.lat], bearing: this.camBearing, padding: this.padding('record') });
+      if (this.mode === 'ride') {
+        map.jumpTo({ center: [p.lng, p.lat], bearing: this.camBearing, padding: this.padding('ride') });
       } else {
         map.jumpTo({ center: [p.lng, p.lat] });
       }
@@ -629,6 +765,17 @@ export class Engine {
     this.spriteKey = '';
     const modality = this.profile?.modality;
     if (modality && this.loaded) this.map?.setPaintProperty('track', 'line-color', TRACK_COLOR[modality]);
+  }
+
+  /** Herói na mesma escala dos POIs: o tamanho segue o zoom (só mexe no DOM quando muda 1 px). */
+  private updateHeroSize(zoom: number): void {
+    const el = this.marker?.getElement();
+    if (!el) return;
+    const w = Math.round(HERO_PX_PER_SIZE * spriteSizeAt(zoom));
+    if (w === this.heroWidth) return;
+    this.heroWidth = w;
+    el.style.width = `${w}px`;
+    el.style.height = `${Math.round(w * HERO_ASPECT)}px`;
   }
 
   private updateSprite(mapBearing: number): void {
@@ -665,6 +812,63 @@ export class Engine {
           : [],
     };
     src.setData(line);
+  }
+
+  /**
+   * Rota em três partes conforme o andamento: feito (cinza), próximos ROUTE_NEXT_M m (verde, com setas) e o
+   * resto (dourado). Antes de iniciar o andamento é 0: o verde mostra para que lado sair.
+   */
+  private updateRoute(): void {
+    const src = this.source('game-route');
+    if (!src) return;
+    const r = this.route;
+    if (!r || r.coords.length < 4) {
+      src.setData(EMPTY);
+      return;
+    }
+    if (this.routeCum?.coords !== r.coords) {
+      const cum = [0];
+      for (let i = 2; i + 1 < r.coords.length; i += 2) {
+        const a = { lng: r.coords[i - 2], lat: r.coords[i - 1] };
+        cum.push(cum[cum.length - 1] + haversine(a, { lng: r.coords[i], lat: r.coords[i + 1] }));
+      }
+      this.routeCum = { coords: r.coords, cum };
+    }
+    const { cum } = this.routeCum;
+    const total = cum[cum.length - 1];
+    const done = Math.min(total, Math.max(0, this.routeDone));
+    const next = Math.min(total, done + ROUTE_NEXT_M);
+
+    const pointAt = (d: number): number[] => {
+      let i = 0;
+      while (i < cum.length - 2 && cum[i + 1] < d) i++;
+      const seg = cum[i + 1] - cum[i];
+      const t = seg > 0 ? (d - cum[i]) / seg : 0;
+      const c = r.coords;
+      return [c[i * 2] + (c[i * 2 + 2] - c[i * 2]) * t, c[i * 2 + 1] + (c[i * 2 + 3] - c[i * 2 + 1]) * t];
+    };
+    const slice = (from: number, to: number): number[][] => {
+      if (to - from < 1) return [];
+      const out = [pointAt(from)];
+      for (let i = 0; i < cum.length; i++) {
+        if (cum[i] > from && cum[i] < to) out.push([r.coords[i * 2], r.coords[i * 2 + 1]]);
+      }
+      out.push(pointAt(to));
+      return out;
+    };
+
+    const features: Feature<LineString | Point>[] = [];
+    for (const [part, line] of [
+      ['done', slice(0, done)],
+      ['rest', slice(next, total)],
+      ['next', slice(done, next)],
+    ] as const) {
+      if (line.length < 2) continue;
+      features.push({ type: 'Feature', properties: { part }, geometry: { type: 'LineString', coordinates: line } });
+    }
+    const destPoint: Point = { type: 'Point', coordinates: [r.dest.lng, r.dest.lat] };
+    features.push({ type: 'Feature', properties: { part: 'dest' }, geometry: destPoint });
+    src.setData({ type: 'FeatureCollection', features });
   }
 
   private updateCoins(): void {

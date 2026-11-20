@@ -104,19 +104,9 @@ body {
 .player-marker .player-shadow {
   position: absolute;
   left: 50%;
-  bottom: -4px;
-  width: 26px;
-  height: 8px;
+  bottom: -7%;
+  width: 66%;
+  height: 17%;
   transform: translateX(-50%);
   background: radial-gradient(ellipse, rgba(29, 23, 48, 0.45) 0 55%, transparent 70%);
-}
-
-.player-marker.is-record {
-  width: 64px;
-  height: 80px;
-}
-
-.player-marker.is-record .player-shadow {
-  width: 40px;
-  height: 12px;
 }

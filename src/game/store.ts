@@ -3,9 +3,10 @@ import { create } from 'zustand';
 import { CHARACTERS } from '../sprites/characters.ts';
 import { COIN_VALUE, RARITY_INFO } from '../sprites/items.ts';
 import { levelFromXp } from './progression.ts';
+import { XP } from './config.ts';
 import type {
   AchievementRecord, AchievementUnlockEvent, ActivitySummary, AvatarConfig, Capture, City, Coin, GpsStatus,
-  LiveActivity, Modal, Modality, PlayerFix, Poi, Profile, Settings, Tab, Toast, Totals,
+  LiveActivity, Modal, Modality, PlannedRoute, PlayerFix, Poi, Profile, RouteProgress, Settings, Tab, Toast, Totals,
 } from './types.ts';
 
 export interface PersistedState {
@@ -22,6 +23,8 @@ export interface PersistedState {
   settings: Settings;
   coins: Coin[];
   live: LiveActivity | null;
+  /** Rota planejada (salva junto: sobrevive ao app fechar no meio da atividade). */
+  route: PlannedRoute | null;
 }
 
 interface RuntimeState {
@@ -38,6 +41,12 @@ interface RuntimeState {
   currentCityId: string | null;
   /** POI tocado no mapa (cartão de detalhes). */
   selected: Poi | null;
+  /** Folha "Nova atividade" aberta (modalidade, rota e INICIAR). */
+  planning: boolean;
+  /** Andamento na rota planejada durante a atividade (ver game/route.ts). */
+  routeProgress: RouteProgress | null;
+  /** Recálculo automático da rota (fora do trajeto): em andamento ou falhou na última tentativa. */
+  rerouting: 'idle' | 'busy' | 'failed';
 }
 
 interface Actions {
@@ -47,6 +56,9 @@ interface Actions {
   setCharacter(id: string): void;
   unlockCharacter(id: string): boolean;
   setTab(t: Tab): void;
+  /** Abre/fecha a folha "Nova atividade" (abrir leva para a aba Mapa). */
+  setPlanning(open: boolean): void;
+  setRoute(route: PlannedRoute | null): void;
   setSetting<K extends keyof Settings>(k: K, v: Settings[K]): void;
   toast(text: string, kind?: Toast['kind'], coinKind?: Toast['coinKind']): void;
   dismissToast(id: number): void;
@@ -85,6 +97,7 @@ export const DEFAULT_PERSISTED: PersistedState = {
   settings: { sound: true, haptics: true, simulator: false },
   coins: [],
   live: null,
+  route: null,
 };
 
 let toastSeq = 1;
@@ -101,7 +114,7 @@ export function liveElapsed(live: LiveActivity, now = Date.now()): number {
 export const useGame = create<GameState>()((set, get) => ({
   ...DEFAULT_PERSISTED,
   hydrated: false,
-  tab: 'record',
+  tab: 'map',
   fix: null,
   gps: 'off',
   toasts: [],
@@ -110,11 +123,14 @@ export const useGame = create<GameState>()((set, get) => ({
   poiRev: 0,
   currentCityId: null,
   selected: null,
+  planning: false,
+  routeProgress: null,
+  rerouting: 'idle',
 
   createProfile(name, avatar, modality, characterId = 'custom') {
     set({
       profile: { name: name.trim() || 'Viajante', characterId, avatar, modality, createdAt: Date.now() },
-      tab: 'record',
+      tab: 'map',
     });
   },
   setModality(m) {
@@ -141,6 +157,15 @@ export const useGame = create<GameState>()((set, get) => ({
   },
   setTab(t) {
     set({ tab: t });
+  },
+  setPlanning(open) {
+    if (open && get().live) return;
+    // fechar sem iniciar descarta a rota planejada (ao iniciar, startActivity fecha a folha e a rota fica)
+    if (open) set({ planning: true, tab: 'map', selected: null });
+    else set({ planning: false, route: get().live ? get().route : null });
+  },
+  setRoute(route) {
+    set({ route, routeProgress: null, rerouting: 'idle' });
   },
   setSetting(k, v) {
     set({ settings: { ...get().settings, [k]: v } });
@@ -195,7 +220,7 @@ export const useGame = create<GameState>()((set, get) => ({
       spawns: 0,
     };
     // A cada nova atividade, as moedas antigas somem e um lote novo nasce (ver tracker).
-    set({ live, coins: [] });
+    set({ live, coins: [], planning: false, tab: 'map' });
   },
   pauseActivity() {
     const live = get().live;
@@ -230,6 +255,8 @@ export const useGame = create<GameState>()((set, get) => ({
     const t = s.totals;
     set({
       live: null,
+      route: null,
+      routeProgress: null,
       activities: [summary, ...s.activities].slice(0, 200),
       totals: {
         ...t,
@@ -242,7 +269,7 @@ export const useGame = create<GameState>()((set, get) => ({
     return summary;
   },
   discardActivity() {
-    set({ live: null });
+    set({ live: null, route: null, routeProgress: null });
   },
 
   collectCoin(coin) {
@@ -254,7 +281,7 @@ export const useGame = create<GameState>()((set, get) => ({
       totals: { ...s.totals, coinsValue: s.totals.coinsValue + value, coinsCount: s.totals.coinsCount + 1 },
       live: s.live ? { ...s.live, coinsValue: s.live.coinsValue + value, coinsCount: s.live.coinsCount + 1 } : null,
     });
-    get().addXp(value);
+    get().addXp(Math.max(1, Math.ceil(value * XP.perCoinValue)));
   },
   capturePoi(poi, cityId) {
     const s = get();
@@ -296,7 +323,9 @@ export const useGame = create<GameState>()((set, get) => ({
     return totalCoins;
   },
   resetProgress() {
-    set({ ...DEFAULT_PERSISTED, tab: 'record', modals: [], toasts: [], selected: null });
+    set({
+      ...DEFAULT_PERSISTED, tab: 'map', modals: [], toasts: [], selected: null, planning: false, routeProgress: null,
+    });
   },
   select(poi) {
     set({ selected: poi });
@@ -318,5 +347,6 @@ export function pickPersisted(s: GameState): PersistedState {
     settings: s.settings,
     coins: s.coins,
     live: s.live,
+    route: s.route,
   };
 }

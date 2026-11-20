@@ -93,7 +93,47 @@ export interface Settings {
   simulator: boolean;
 }
 
-export type Tab = 'map' | 'record' | 'stats';
+/** Lugar encontrado na busca de endereços (Photon). */
+export interface Place {
+  /** Linha principal: nome do lugar ou "rua, número". */
+  name: string;
+  /** Linha de baixo: rua, bairro e cidade (o que houver). */
+  detail: string;
+  lng: number;
+  lat: number;
+}
+
+/**
+ * Rota planejada na folha "Nova atividade": até um endereço (só ida ou ida e volta) ou uma volta automática
+ * com a distância pedida, que sai e chega no mesmo ponto.
+ */
+export interface PlannedRoute {
+  kind: 'address' | 'loop';
+  /** Destino; na volta automática, o próprio ponto de partida (com o nome "Volta de X km"). */
+  dest: Place;
+  roundTrip: boolean;
+  /** Perfil usado no traçado (bike → ciclovias/ruas; corrida → perfil a pé). */
+  modality: Modality;
+  /** Trajeto em pares lng,lat achatados. */
+  coords: number[];
+  distanceM: number;
+  /** Paradas que ainda faltam (já ajustadas às ruas): pontos intermediários, destino e, se for o caso, a volta. */
+  stops: LngLat[];
+  /** Fração do trajeto (0 a 1) que passa por onde ainda há névoa. */
+  fogShare: number;
+}
+
+/** Andamento na rota durante a atividade. */
+export interface RouteProgress {
+  doneM: number;
+  remainingM: number;
+  /** Distância até o trajeto (m). */
+  offRouteM: number;
+  arrived: boolean;
+}
+
+/** Abas da barra. Gravar não é aba: o botão do meio abre a folha "Nova atividade" (ver store `planning`). */
+export type Tab = 'map' | 'stats';
 
 export interface PlayerFix extends LngLat {
   accuracy: number;

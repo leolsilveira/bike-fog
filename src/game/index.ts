@@ -3,6 +3,7 @@ import { hydrate, startAutosave } from './persist.ts';
 import { loadCityPolygons } from './cities.ts';
 import { checkAndGrantAchievements, evaluateAchievements } from './achievements.ts';
 import { initLocation, player } from './location.ts';
+import { initRouteTracking } from './route.ts';
 import { finishAndSaveTrack, onActivityChange, restoreLiveTrack } from './tracker.ts';
 import { initAudio } from './audio.ts';
 import { updateTiles } from './tiles.ts';
@@ -34,6 +35,7 @@ export function initGame(): Promise<void> {
     const fix = useGame.getState().fix;
     if (fix) updateTiles(fix);
 
+    initRouteTracking();
     initLocation();
 
     let prevId = useGame.getState().live?.id ?? null;

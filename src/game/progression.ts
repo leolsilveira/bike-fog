@@ -1,8 +1,12 @@
 // Curva de níveis e títulos.
 
-/** XP necessário para ir do nível n para n+1. */
+/**
+ * XP necessário para ir do nível n para n+1: 100, 170, 250, 350, 470… (cresce em curva, arredondado a 10).
+ * Acumulado: nível 2 = 100, 5 = 870, 10 = 4.690, 15 = 13.410, 20 = 29.030.
+ */
 export function xpToNext(level: number): number {
-  return 120 + (level - 1) * 90;
+  const n = level - 1;
+  return Math.round((100 + 60 * n + 8 * n * n) / 10) * 10;
 }
 
 export interface LevelInfo {

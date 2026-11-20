@@ -1,7 +1,7 @@
 // Protocolo da ponte entre o app React Native (host) e o mapa (MapLibre GL JS rodando numa WebView).
 // O mapa é só renderização: toda regra do jogo vive no host. Este arquivo é importado pelos dois lados,
 // então só pode conter tipos (nada de runtime, nada de React Native).
-import type { AvatarConfig, Coin, LngLat, Modality, PlayerFix, Tab } from '../game/types.ts';
+import type { AvatarConfig, Coin, LngLat, Modality, PlayerFix } from '../game/types.ts';
 
 export interface MapProfile {
   characterId: string;
@@ -27,12 +27,19 @@ export interface PoiMarker {
 
 export type LiveStatus = 'none' | 'recording' | 'paused';
 
+/**
+ * Câmera do mapa: `map` = visão de cima (explorar, planejar), `ride` = câmera inclinada atrás do personagem
+ * (só com atividade em andamento), `stats` = mapa parado por trás da tela de estatísticas.
+ */
+export type CameraMode = 'map' | 'ride' | 'stats';
+
 /** Host -> mapa. */
 export type HostToMap =
   /** Primeira mensagem útil: cria o mapa. Mensagens anteriores ficam na fila do mapa. */
-  | { type: 'init'; center: LngLat; mode: Tab; live: LiveStatus; profile: MapProfile | null }
-  /** Aba atual (muda câmera, zoom, pitch, opacidade da névoa) e estado da atividade (tilt-shift, vinheta). */
-  | { type: 'mode'; mode: Tab; live: LiveStatus }
+  /** Primeira mensagem útil: cria o mapa. Mensagens anteriores ficam na fila do mapa. */
+  | { type: 'init'; center: LngLat; mode: CameraMode; live: LiveStatus; profile: MapProfile | null }
+  /** Modo da câmera (zoom, pitch, opacidade da névoa) e estado da atividade (tilt-shift, vinheta). */
+  | { type: 'mode'; mode: CameraMode; live: LiveStatus }
   | { type: 'profile'; characterId: string; avatar?: AvatarConfig; modality: Modality }
   /** Células exploradas (chaves de `geo.cellKey`). `reset` substitui tudo; senão, acrescenta (com animação). */
   | { type: 'cells'; reset: boolean; keys: number[] }
@@ -42,6 +49,10 @@ export type HostToMap =
   | { type: 'pois'; pois: PoiMarker[] }
   /** Trilha da atividade: pares lng,lat achatados. `reset` substitui; senão, acrescenta pontos. */
   | { type: 'track'; reset: boolean; coords: number[] }
+  /** Rota planejada: pares lng,lat achatados e o destino (marcado no mapa). `null` apaga. */
+  | { type: 'route'; route: { coords: number[]; dest: LngLat } | null }
+  /** Quanto da rota já foi percorrido (m): o mapa pinta o feito de cinza e o próximo trecho de verde. */
+  | { type: 'routeDone'; doneM: number }
   /** Posição do GPS real (o mapa suaviza a posição exibida). */
   | { type: 'gpsFix'; fix: PlayerFix }
   /** Liga/desliga o simulador. `pos` = onde o jogador simulado começa. */
@@ -51,6 +62,16 @@ export type HostToMap =
   | { type: 'camera'; action: 'recenter' }
   | { type: 'camera'; action: 'focus'; lng: number; lat: number }
   | { type: 'camera'; action: 'zoomBy'; delta: number }
+  /** Solta a câmera do jogador e enquadra uma área; `padding` em px reserva espaço para a interface por cima. */
+  | {
+      type: 'camera';
+      action: 'fit';
+      west: number;
+      south: number;
+      east: number;
+      north: number;
+      padding: { top: number; bottom: number; left: number; right: number };
+    }
   /** App em primeiro plano ou não (o mapa para o loop de quadros quando inativo). */
   | { type: 'active'; active: boolean }
   /**
