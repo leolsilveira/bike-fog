@@ -60,11 +60,15 @@ export const fog = {
     return { added, byCity };
   },
 
-  /** Revela células num raio ao longo de vários segmentos e notifica os ouvintes uma única vez. */
+  /**
+   * Revela células num raio ao longo de vários segmentos.
+   * Com `notify = false`, não avisa os ouvintes ainda (use `notifyAdded` ao fim de um lote grande).
+   */
   revealSegments(
     segments: [LngLat, LngLat][],
     radius: number,
     cityOf: (p: LngLat) => string | null,
+    notify = true,
   ): { added: number[]; byCity: Record<string, number> } {
     const added: number[] = [];
     const byCity: Record<string, number> = {};
@@ -82,8 +86,13 @@ export const fog = {
         }
       }
     }
-    if (added.length) listeners.forEach((fn) => fn(added, false));
+    if (notify && added.length) listeners.forEach((fn) => fn(added, false));
     return { added, byCity };
+  },
+
+  /** Notifica os ouvintes de uma vez após revelar vários lotes com `notify = false`. */
+  notifyAdded(added: number[]): void {
+    if (added.length) listeners.forEach((fn) => fn(added, false));
   },
 
   /** Atribui cidade às células que ainda não têm (quando o polígono da cidade chega). */

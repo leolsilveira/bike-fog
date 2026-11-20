@@ -1,5 +1,5 @@
-// Extração de arquivos GPX (direto, .gpx.gz ou .zip do Strava) e parser GPX puro (sem DOMParser).
-import { gunzipSync, strFromU8, unzipSync } from 'fflate';
+// Extração em streaming de arquivos GPX (direto, .gpx.gz ou .zip do Strava) e parser GPX puro (sem DOMParser).
+import { gunzipSync, strFromU8, Unzip, UnzipInflate, UnzipPassThrough, unzipSync } from 'fflate';
 import { haversine, type LngLat } from './geo.ts';
 import type { Modality } from './types.ts';
 
@@ -17,8 +17,22 @@ export interface ParsedGpxActivity {
   segments: [LngLat, LngLat][];
 }
 
+export interface ChunkedFileSource {
+  name: string;
+  size: number;
+  readChunk(length: number): Promise<Uint8Array>;
+  close(): void;
+}
+
 /** Pulo maior que 500 m entre dois pontos seguidos é tratado como pausa/teleporte (não risca névoa). */
 const MAX_SEGMENT_JUMP_M = 500;
+/** Tamanho de cada bloco lido do disco ao fazer streaming de ZIPs grandes (1 MB). */
+const STREAM_CHUNK_BYTES = 1024 * 1024;
+
+/** Libera a thread principal para o React/UI redesenhar o progresso sem travar. */
+export function yieldUi(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
 
 function isZip(name: string, bytes: Uint8Array): boolean {
   if (bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04) {
@@ -32,20 +46,153 @@ function isGzip(name: string, bytes: Uint8Array): boolean {
   return name.toLowerCase().endsWith('.gz');
 }
 
-/** Extrai todos os textos GPX de um arquivo .zip (ex.: exportação do Strava), .gpx.gz ou .gpx. */
+function concatChunks(chunks: Uint8Array[]): Uint8Array {
+  if (chunks.length === 1) return chunks[0];
+  let total = 0;
+  for (const c of chunks) total += c.length;
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    out.set(c, offset);
+    offset += c.length;
+  }
+  return out;
+}
+
+function gpxEntryKind(rawPath: string): 'gpx' | 'gpx.gz' | null {
+  const base = rawPath.split('/').pop() ?? rawPath;
+  if (!base || rawPath.includes('__MACOSX/') || base.startsWith('._')) return null;
+  const lower = base.toLowerCase();
+  if (lower.endsWith('.gpx')) return 'gpx';
+  if (lower.endsWith('.gpx.gz')) return 'gpx.gz';
+  return null;
+}
+
+/**
+ * Faz streaming de um .zip (pulando fotos/FIT/CSV sem descomprimir), .gpx.gz ou .gpx,
+ * entregando um GPX de cada vez e cedendo o controle para a UI entre blocos.
+ */
+export async function streamGpxEntries(
+  source: ChunkedFileSource,
+  handlers: {
+    onEntry: (entry: { name: string; xml: string }) => Promise<void>;
+    onReadProgress?: (bytesRead: number, totalBytes: number) => void;
+    isCancelled?: () => boolean;
+  },
+): Promise<{ found: number; cancelled: boolean }> {
+  const { onEntry, onReadProgress, isCancelled } = handlers;
+  let bytesRead = 0;
+  let found = 0;
+  let cancelled = false;
+
+  try {
+    const first = await source.readChunk(STREAM_CHUNK_BYTES);
+    if (!first.length) return { found: 0, cancelled: false };
+    bytesRead += first.length;
+    onReadProgress?.(bytesRead, source.size);
+
+    if (isZip(source.name, first)) {
+      const ready: { name: string; xml: string }[] = [];
+      const uz = new Unzip((file) => {
+        const kind = gpxEntryKind(file.name);
+        // Não chamar file.start() pula fotos, vídeos, .fit.gz e CSVs sem descomprimir nada!
+        if (!kind) return;
+        const base = file.name.split('/').pop() ?? file.name;
+        const outName = kind === 'gpx.gz' ? base.slice(0, -3) : base;
+        const parts: Uint8Array[] = [];
+        file.ondata = (err, data, final) => {
+          if (err) {
+            console.warn('[gpx-import] erro ao descomprimir', file.name, err);
+            return;
+          }
+          if (data?.length) parts.push(data);
+          if (final && parts.length) {
+            try {
+              const raw = concatChunks(parts);
+              const bytes = kind === 'gpx.gz' ? gunzipSync(raw) : raw;
+              ready.push({ name: outName, xml: strFromU8(bytes) });
+            } catch (e) {
+              console.warn('[gpx-import] falha ao decodificar', file.name, e);
+            }
+          }
+        };
+        file.start();
+      });
+      uz.register(UnzipPassThrough);
+      uz.register(UnzipInflate);
+
+      const drain = async () => {
+        while (ready.length > 0) {
+          if (isCancelled?.()) {
+            cancelled = true;
+            return;
+          }
+          const item = ready.shift()!;
+          found++;
+          await onEntry(item);
+          await yieldUi();
+        }
+      };
+
+      let current: Uint8Array = first;
+      while (true) {
+        if (isCancelled?.()) {
+          cancelled = true;
+          break;
+        }
+        const next = await source.readChunk(STREAM_CHUNK_BYTES);
+        const isLast = next.length === 0;
+        uz.push(current, isLast);
+        await drain();
+        if (cancelled || isLast) break;
+        bytesRead += next.length;
+        onReadProgress?.(bytesRead, source.size);
+        await yieldUi();
+        current = next;
+      }
+      return { found, cancelled };
+    }
+
+    // Arquivo único (.gpx ou .gpx.gz)
+    const chunks: Uint8Array[] = [first];
+    while (true) {
+      if (isCancelled?.()) {
+        cancelled = true;
+        return { found: 0, cancelled: true };
+      }
+      const next = await source.readChunk(STREAM_CHUNK_BYTES);
+      if (!next.length) break;
+      chunks.push(next);
+      bytesRead += next.length;
+      onReadProgress?.(bytesRead, source.size);
+      await yieldUi();
+    }
+    const all = concatChunks(chunks);
+    const xml = isGzip(source.name, all) ? strFromU8(gunzipSync(all)) : strFromU8(all);
+    found = 1;
+    await onEntry({ name: source.name.replace(/\.gz$/i, ''), xml });
+    return { found, cancelled: false };
+  } finally {
+    source.close();
+  }
+}
+
+/** Extrai todos os textos GPX de um buffer já em memória (.zip, .gpx.gz ou .gpx). */
 export function extractGpxFiles(fileName: string, bytes: Uint8Array): { name: string; xml: string }[] {
   if (isZip(fileName, bytes)) {
-    const entries = unzipSync(bytes);
+    const entries = unzipSync(bytes, {
+      filter: (f) => gpxEntryKind(f.name) !== null,
+    });
     const out: { name: string; xml: string }[] = [];
     for (const [rawPath, data] of Object.entries(entries)) {
       if (!data.length) continue;
+      const kind = gpxEntryKind(rawPath);
+      if (!kind) continue;
       const base = rawPath.split('/').pop() ?? rawPath;
-      if (rawPath.includes('__MACOSX/') || base.startsWith('._')) continue;
-      const lower = base.toLowerCase();
       try {
-        if (lower.endsWith('.gpx')) {
+        if (kind === 'gpx') {
           out.push({ name: base, xml: strFromU8(data) });
-        } else if (lower.endsWith('.gpx.gz')) {
+        } else {
           out.push({ name: base.slice(0, -3), xml: strFromU8(gunzipSync(data)) });
         }
       } catch (err) {

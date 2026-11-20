@@ -1,28 +1,42 @@
-// Web: seletor de arquivos (.zip / .gpx) e download de .zip pelo navegador.
-export interface PickedFile {
+// Web: seletor de arquivos com leitura em streaming (blocos) e download de .zip pelo navegador.
+export interface PickedActivityFile {
   name: string;
-  bytes: Uint8Array;
+  size: number;
+  readChunk(length: number): Promise<Uint8Array>;
+  close(): void;
 }
 
-export function pickActivityFile(): Promise<PickedFile | null> {
+export function pickActivityFile(): Promise<PickedActivityFile | null> {
   return new Promise((resolve) => {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.zip,.gpx,.gz,application/zip,application/gpx+xml';
     let settled = false;
-    const done = (val: PickedFile | null) => {
+    const done = (val: PickedActivityFile | null) => {
       if (settled) return;
       settled = true;
       resolve(val);
     };
-    input.onchange = async () => {
+    input.onchange = () => {
       const f = input.files?.[0];
       if (!f) {
         done(null);
         return;
       }
-      const buf = await f.arrayBuffer();
-      done({ name: f.name, bytes: new Uint8Array(buf) });
+      let offset = 0;
+      done({
+        name: f.name,
+        size: f.size,
+        async readChunk(length: number): Promise<Uint8Array> {
+          if (offset >= f.size) return new Uint8Array(0);
+          const slice = f.slice(offset, offset + length);
+          offset += slice.size;
+          return new Uint8Array(await slice.arrayBuffer());
+        },
+        close() {
+          offset = f.size;
+        },
+      });
     };
     input.oncancel = () => done(null);
     input.click();

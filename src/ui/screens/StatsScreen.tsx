@@ -1,6 +1,6 @@
 // Tela de Stats (por cima do mapa, com rolagem): perfil e nível, totais, cidades, coleção estilo pokédex,
 // histórico com exportação GPX e ajustes. Port de legacy/src/ui/screens/StatsScreen.tsx + global.css.
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Animated, Linking, Pressable, ScrollView, StyleSheet, useWindowDimensions, View, type LayoutChangeEvent,
 } from 'react-native';
@@ -10,7 +10,7 @@ import { levelFromXp } from '../../game/progression.ts';
 import { cityPercent } from '../../game/cities.ts';
 import { wipeAll } from '../../game/persist.ts';
 import { exportGpx } from '../../game/gpx.ts';
-import { exportAllActivities, importActivitiesFromFile } from '../../game/activitiesTransfer.ts';
+import { exportAllActivities, importActivitiesFromFile, type ImportProgress } from '../../game/activitiesTransfer.ts';
 import { cellSizeM, formatArea, formatDistance, formatDuration } from '../../game/geo.ts';
 import { sfx } from '../../game/audio.ts';
 import { GAME_NAME } from '../../game/config.ts';
@@ -200,6 +200,8 @@ export function StatsScreen() {
   const pushModal = useGame((s) => s.pushModal);
   const [showAll, setShowAll] = useState(false);
   const [transferring, setTransferring] = useState<'import' | 'export' | null>(null);
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
+  const cancelImportRef = useRef(false);
   const { width } = useWindowDimensions();
   const { safeT, tabbarH } = useSafe();
 
@@ -250,11 +252,17 @@ export function StatsScreen() {
   const runImport = async () => {
     if (transferring) return;
     sfx.click();
+    cancelImportRef.current = false;
     setTransferring('import');
+    setImportProgress({ percent: 0, label: 'Selecionando arquivo…' });
     try {
-      await importActivitiesFromFile();
+      await importActivitiesFromFile({
+        onProgress: (p) => setImportProgress(p),
+        isCancelled: () => cancelImportRef.current,
+      });
     } finally {
       setTransferring(null);
+      setImportProgress(null);
     }
   };
 
@@ -446,15 +454,40 @@ export function StatsScreen() {
                 title="Importar atividades"
                 desc="Carrega um .zip do Strava ou arquivo .gpx para revelar o mapa (não altera XP nem nível)."
               >
-                <PxButton
-                  size="small"
-                  variant="mint"
-                  disabled={transferring !== null}
-                  onPress={() => void runImport()}
-                >
-                  {transferring === 'import' ? 'Importando…' : 'Importar'}
-                </PxButton>
+                {transferring === 'import' ? (
+                  <PxButton
+                    size="small"
+                    variant="coral"
+                    onPress={() => {
+                      cancelImportRef.current = true;
+                    }}
+                  >
+                    Cancelar
+                  </PxButton>
+                ) : (
+                  <PxButton
+                    size="small"
+                    variant="mint"
+                    disabled={transferring !== null}
+                    onPress={() => void runImport()}
+                  >
+                    Importar
+                  </PxButton>
+                )}
               </Setting>
+              {importProgress && (
+                <View style={styles.importProgress}>
+                  <View style={styles.importProgressHead}>
+                    <Txt size={13} color={C.cream} style={styles.shrink} numberOfLines={1}>
+                      {importProgress.label}
+                    </Txt>
+                    <Arcade size={10} spacing={0} color={C.mint}>
+                      {Math.round(importProgress.percent)}%
+                    </Arcade>
+                  </View>
+                  <Bar percent={importProgress.percent} variant="mint" height={12} />
+                </View>
+              )}
               <Setting
                 title="Exportar atividades"
                 desc="Salva todas as trilhas gravadas em um arquivo .zip no formato GPX."
@@ -527,6 +560,8 @@ const styles = StyleSheet.create({
   settings: { gap: 2, paddingVertical: 6, paddingHorizontal: 14 },
   setting: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingVertical: 12 },
   settingText: { flexShrink: 1 },
+  importProgress: { gap: 6, paddingBottom: 12 },
+  importProgressHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   dashed: { height: 2, flexDirection: 'row', justifyContent: 'space-between', overflow: 'hidden' },
   dash: { width: 6, height: 2, backgroundColor: C.panel3 },
   switch: { width: 54, height: 28, flexShrink: 0, backgroundColor: C.ink },
