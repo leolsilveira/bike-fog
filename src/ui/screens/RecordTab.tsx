@@ -9,7 +9,7 @@ import { player } from '../../game/location.ts';
 import { finishAndSaveTrack, kickTracker } from '../../game/tracker.ts';
 import { saveNow } from '../../game/persist.ts';
 import { sfx } from '../../game/audio.ts';
-import { cellSizeM, formatArea, formatDistance, formatDuration, formatPace, formatSpeed } from '../../game/geo.ts';
+import { cellSizeM, formatArea, formatDuration, formatPace, formatSpeed } from '../../game/geo.ts';
 import type { GpsStatus } from '../../game/types.ts';
 import type { IconName } from '../../sprites/icons.ts';
 import { CoinImg, Icon, PoiIconImg } from '../components/Sprites.tsx';
@@ -73,7 +73,7 @@ export function RecordTab() {
   const simulator = useGame((s) => s.settings.simulator);
   const now = useNow(500);
   const { width } = useWindowDimensions();
-  const { safeT, tabbarH } = useSafe();
+  const { safeT, safeB, tabbarH } = useSafe();
   useKeepAwakeWhile(live?.status === 'recording');
 
   if (!profile) return null;
@@ -111,7 +111,7 @@ export function RecordTab() {
             <CityChip />
           </View>
         </View>
-        <SideButtons showZoom={false} />
+        <SideButtons showZoom={false} bottom={tabbarH + 178} />
         <View style={[styles.recBottom, bottom]}>
           {(gps === 'denied' || gps === 'unavailable') && !simulator && (
             <PxBox style={styles.noGps} testID="no-gps">
@@ -165,13 +165,13 @@ export function RecordTab() {
   }
 
   const elapsed = liveElapsed(live, now);
-  const avg = live.movingS > 0 ? live.distanceM / live.movingS : 0;
   const speedNow = player.speed;
   const isBike = live.modality === 'bike';
   const area = live.newCells * cellSizeM(fix?.lat ?? -23.5) ** 2;
   const valSize = clampVw(width, 13, 4, 22);
   const bigSize = clampVw(width, 18, 6, 30);
   const nCaptures = live.captures.length;
+  const activeBottom = { bottom: safeB + 18 };
 
   return (
     <View style={styles.layer}>
@@ -199,22 +199,16 @@ export function RecordTab() {
               <CoinImg size={16} /> {live.coinsValue}
             </Chip>
             <Chip>
-              <PoiIconImg category="atracao" size={16} /> {nCaptures} {nCaptures === 1 ? 'captura' : 'capturas'}
+              <PoiIconImg category="atracao" size={16} /> {nCaptures}
             </Chip>
             <Chip>
               <Icon name="cloud" size={16} accent={C.iconMuted} /> +{formatArea(area)}
             </Chip>
-            <Chip color={C.muted}>média {isBike ? `${formatSpeed(avg)} km/h` : `${formatPace(avg)}/km`}</Chip>
           </View>
         </View>
       </View>
-      <SideButtons showZoom={false} />
-      <View style={[styles.recBottom, bottom]}>
-        {live.status === 'paused' && (
-          <Hint size={15}>
-            Pausado · {formatDistance(live.distanceM)} até agora
-          </Hint>
-        )}
+      <SideButtons showZoom={false} bottom={safeB + 86} />
+      <View style={[styles.recBottom, activeBottom]}>
         <View style={styles.recControls}>
           {live.status === 'recording' ? (
             <PxButton

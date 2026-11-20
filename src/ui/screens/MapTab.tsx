@@ -25,7 +25,7 @@ export function MapTab() {
   const selected = useGame((s) => s.selected);
   const [open, setOpen] = useState(true);
   const tick = useNow(3000);
-  const { safeT } = useSafe();
+  const { safeT, tabbarH } = useSafe();
 
   const nearby = useMemo(() => {
     void poiRev;
@@ -44,7 +44,7 @@ export function MapTab() {
       <View style={[styles.city, { top: 88 + safeT }]}>
         <CityChip />
       </View>
-      <SideButtons showZoom />
+      <SideButtons showZoom bottom={tabbarH + (!selected && open ? 186 : 74)} />
       {!selected && <Nearby items={nearby} open={open} onToggle={() => setOpen((o) => !o)} />}
     </View>
   );
