@@ -60,6 +60,32 @@ export const fog = {
     return { added, byCity };
   },
 
+  /** Revela células num raio ao longo de vários segmentos e notifica os ouvintes uma única vez. */
+  revealSegments(
+    segments: [LngLat, LngLat][],
+    radius: number,
+    cityOf: (p: LngLat) => string | null,
+  ): { added: number[]; byCity: Record<string, number> } {
+    const added: number[] = [];
+    const byCity: Record<string, number> = {};
+    for (const [a, b] of segments) {
+      const dist = haversine(a, b);
+      const steps = Math.max(1, Math.ceil(dist / (radius * 0.5)));
+      for (let i = 0; i <= steps; i++) {
+        const p = lerpLngLat(a, b, i / steps);
+        for (const key of cellsInRadius(p, radius)) {
+          if (cells.has(key)) continue;
+          const city = cityOf(cellCenter(key));
+          cells.set(key, city ? cityIndex(city) : 0);
+          if (city) byCity[city] = (byCity[city] ?? 0) + 1;
+          added.push(key);
+        }
+      }
+    }
+    if (added.length) listeners.forEach((fn) => fn(added, false));
+    return { added, byCity };
+  },
+
   /** Atribui cidade às células que ainda não têm (quando o polígono da cidade chega). */
   assignPending(cityOf: (p: LngLat) => string | null): number {
     let n = 0;
