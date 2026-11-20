@@ -10,6 +10,7 @@ import { levelFromXp } from '../../game/progression.ts';
 import { cityPercent } from '../../game/cities.ts';
 import { wipeAll } from '../../game/persist.ts';
 import { exportGpx } from '../../game/gpx.ts';
+import { exportAllActivities, importActivitiesFromFile } from '../../game/activitiesTransfer.ts';
 import { cellSizeM, formatArea, formatDistance, formatDuration } from '../../game/geo.ts';
 import { sfx } from '../../game/audio.ts';
 import { GAME_NAME } from '../../game/config.ts';
@@ -198,6 +199,7 @@ export function StatsScreen() {
   const fix = useGame((s) => s.fix);
   const pushModal = useGame((s) => s.pushModal);
   const [showAll, setShowAll] = useState(false);
+  const [transferring, setTransferring] = useState<'import' | 'export' | null>(null);
   const { width } = useWindowDimensions();
   const { safeT, tabbarH } = useSafe();
 
@@ -232,6 +234,28 @@ export function StatsScreen() {
     if (!ok) return;
     await wipeAll();
     useGame.getState().resetProgress();
+  };
+
+  const runExport = async () => {
+    if (transferring) return;
+    sfx.click();
+    setTransferring('export');
+    try {
+      await exportAllActivities();
+    } finally {
+      setTransferring(null);
+    }
+  };
+
+  const runImport = async () => {
+    if (transferring) return;
+    sfx.click();
+    setTransferring('import');
+    try {
+      await importActivitiesFromFile();
+    } finally {
+      setTransferring(null);
+    }
   };
 
   return (
@@ -418,6 +442,32 @@ export function StatsScreen() {
                 label="Modo simulador"
                 desc="GPS virtual para testar no computador: joystick, WASD/setas, Shift = turbo, botão direito/toque longo no mapa = teletransporte."
               />
+              <Setting
+                title="Importar atividades"
+                desc="Carrega um .zip do Strava ou arquivo .gpx para revelar o mapa (não altera XP nem nível)."
+              >
+                <PxButton
+                  size="small"
+                  variant="mint"
+                  disabled={transferring !== null}
+                  onPress={() => void runImport()}
+                >
+                  {transferring === 'import' ? 'Importando…' : 'Importar'}
+                </PxButton>
+              </Setting>
+              <Setting
+                title="Exportar atividades"
+                desc="Salva todas as trilhas gravadas em um arquivo .zip no formato GPX."
+              >
+                <PxButton
+                  size="small"
+                  variant="sky"
+                  disabled={transferring !== null || activities.length === 0}
+                  onPress={() => void runExport()}
+                >
+                  {transferring === 'export' ? 'Exportando…' : 'Exportar'}
+                </PxButton>
+              </Setting>
               <Setting title="Apagar progresso" desc="Remove névoa revelada, capturas, moedas e histórico deste aparelho.">
                 <PxButton size="small" variant="coral" onPress={() => void wipe()}>
                   Apagar
