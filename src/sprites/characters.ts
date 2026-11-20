@@ -467,13 +467,16 @@ export interface CharacterColors {
   bikeShade: string;
 }
 
-export interface CharacterDef {
+export interface CharacterAppearance {
+  hair: HairStyle;
+  colors: CharacterColors;
+}
+
+export interface CharacterDef extends CharacterAppearance {
   id: string;
   name: string;
   tagline: string;
-  hair: HairStyle;
   price: number;
-  colors: CharacterColors;
 }
 
 export const CHARACTERS: CharacterDef[] = [
@@ -579,7 +582,7 @@ export function characterById(id: string): CharacterDef {
   return CHARACTERS.find((c) => c.id === id) ?? CHARACTERS[0];
 }
 
-export function paletteFor(def: CharacterDef): Palette {
+export function paletteFor(def: CharacterAppearance): Palette {
   const c = def.colors;
   return {
     ...BASE_PALETTE,
@@ -614,7 +617,7 @@ function dirOf(facing: Facing): Dir {
  * Compõe um quadro do personagem. `frame` < 0 = parado.
  * Corrida: ciclo [passoA, apoio, passoB, apoio] com leve quique.
  */
-export function characterFrame(def: CharacterDef, modality: Modality, facing: Facing, frame: number): Raster {
+export function characterFrame(def: CharacterAppearance, modality: Modality, facing: Facing, frame: number): Raster {
   const dir = dirOf(facing);
   const pal = paletteFor(def);
   const layers: Layer[] = [];

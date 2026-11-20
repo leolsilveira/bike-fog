@@ -5,8 +5,8 @@ import { COIN_VALUE, RARITY_INFO } from '../sprites/items.ts';
 import { levelFromXp } from './progression.ts';
 import { XP } from './config.ts';
 import type {
-  ActivitySummary, Capture, City, Coin, GpsStatus, LiveActivity, Modal, Modality, PlannedRoute, PlayerFix, Poi,
-  Profile, RouteProgress, Settings, Tab, Toast, Totals,
+  AchievementRecord, AchievementUnlockEvent, ActivitySummary, AvatarConfig, Capture, City, Coin, GpsStatus,
+  LiveActivity, Modal, Modality, PlannedRoute, PlayerFix, Poi, Profile, RouteProgress, Settings, Tab, Toast, Totals,
 } from './types.ts';
 
 export interface PersistedState {
@@ -19,6 +19,7 @@ export interface PersistedState {
   captures: Record<string, Capture>;
   cities: Record<string, City>;
   activities: ActivitySummary[];
+  achievements: Record<string, AchievementRecord>;
   settings: Settings;
   coins: Coin[];
   live: LiveActivity | null;
@@ -49,8 +50,9 @@ interface RuntimeState {
 }
 
 interface Actions {
-  createProfile(name: string, characterId: string, modality: Modality): void;
+  createProfile(name: string, avatar: AvatarConfig, modality: Modality, characterId?: string): void;
   setModality(m: Modality): void;
+  setAvatar(avatar: AvatarConfig, characterId?: string): void;
   setCharacter(id: string): void;
   unlockCharacter(id: string): boolean;
   setTab(t: Tab): void;
@@ -70,6 +72,7 @@ interface Actions {
   discardActivity(): void;
   collectCoin(coin: Coin): void;
   capturePoi(poi: Poi, cityId: string | null): Capture | null;
+  grantAchievements(unlocks: AchievementUnlockEvent[], opts?: { batchToast?: boolean }): number;
   resetProgress(): void;
   select(poi: Poi | null): void;
 }
@@ -90,6 +93,7 @@ export const DEFAULT_PERSISTED: PersistedState = {
   captures: {},
   cities: {},
   activities: [],
+  achievements: {},
   settings: { sound: true, haptics: true, simulator: false },
   coins: [],
   live: null,
@@ -123,13 +127,21 @@ export const useGame = create<GameState>()((set, get) => ({
   routeProgress: null,
   rerouting: 'idle',
 
-  createProfile(name, characterId, modality) {
-    set({ profile: { name: name.trim() || 'Viajante', characterId, modality, createdAt: Date.now() }, tab: 'map' });
+  createProfile(name, avatar, modality, characterId = 'custom') {
+    set({
+      profile: { name: name.trim() || 'Viajante', characterId, avatar, modality, createdAt: Date.now() },
+      tab: 'map',
+    });
   },
   setModality(m) {
     const p = get().profile;
     if (!p || get().live) return;
     set({ profile: { ...p, modality: m } });
+  },
+  setAvatar(avatar, characterId) {
+    const p = get().profile;
+    if (!p) return;
+    set({ profile: { ...p, avatar, characterId: characterId ?? p.characterId } });
   },
   setCharacter(id) {
     const p = get().profile;
@@ -161,7 +173,8 @@ export const useGame = create<GameState>()((set, get) => ({
   toast(text, kind = 'info', coinKind) {
     const t: Toast = { id: toastSeq++, text, kind, coinKind };
     set({ toasts: [...get().toasts.slice(-3), t] });
-    setTimeout(() => get().dismissToast(t.id), kind === 'coin' ? 1600 : 3200);
+    const ms = kind === 'coin' ? 1600 : kind === 'achievement' ? 3800 : 3200;
+    setTimeout(() => get().dismissToast(t.id), ms);
   },
   dismissToast(id) {
     set({ toasts: get().toasts.filter((t) => t.id !== id) });
@@ -284,6 +297,31 @@ export const useGame = create<GameState>()((set, get) => ({
     get().addXp(xp);
     return capture;
   },
+  grantAchievements(unlocks, opts) {
+    if (!unlocks.length) return 0;
+    const s = get();
+    const fresh = unlocks.filter((u) => !s.achievements[u.key]);
+    if (!fresh.length) return 0;
+    const now = Date.now();
+    const nextAchievements: Record<string, AchievementRecord> = { ...s.achievements };
+    let totalCoins = 0;
+    for (const u of fresh) {
+      if (nextAchievements[u.key]) continue;
+      nextAchievements[u.key] = { at: now, coins: u.coins };
+      totalCoins += u.coins;
+    }
+    set({
+      achievements: nextAchievements,
+      wallet: s.wallet + totalCoins,
+    });
+    if (opts?.batchToast || fresh.length >= 3) {
+      const label = fresh.length === 1 ? 'conquista desbloqueada' : 'conquistas desbloqueadas';
+      get().toast(`${fresh.length} ${label}! +${totalCoins.toLocaleString('pt-BR')} moedas`, 'achievement');
+    } else {
+      for (const unlock of fresh) get().pushModal({ type: 'achievement', unlock });
+    }
+    return totalCoins;
+  },
   resetProgress() {
     set({
       ...DEFAULT_PERSISTED, tab: 'map', modals: [], toasts: [], selected: null, planning: false, routeProgress: null,
@@ -305,6 +343,7 @@ export function pickPersisted(s: GameState): PersistedState {
     captures: s.captures,
     cities: s.cities,
     activities: s.activities,
+    achievements: s.achievements,
     settings: s.settings,
     coins: s.coins,
     live: s.live,

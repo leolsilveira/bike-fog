@@ -7,16 +7,26 @@ import { scaleRaster, type Raster } from '../sprites/pixel.ts';
 
 /** Maior ampliação aceita (um personagem de 24 px vira no máximo 384 px). */
 const MAX_SCALE = 16;
+/** Limite de entradas em cache (evita crescimento ilimitado ao testar cores no customizador). */
+const MAX_CACHE = 160;
 
 const rasterCache = new Map<string, Raster>();
 const uriCache = new Map<string, string>();
+
+function cacheSet<V>(map: Map<string, V>, key: string, value: V): void {
+  if (map.size >= MAX_CACHE) {
+    const oldest = map.keys().next().value;
+    if (oldest !== undefined) map.delete(oldest);
+  }
+  map.set(key, value);
+}
 
 /** Raster base (1x) de uma chave, calculado uma vez. */
 export function cachedRaster(key: string, make: () => Raster): Raster {
   let r = rasterCache.get(key);
   if (!r) {
     r = make();
-    rasterCache.set(key, r);
+    cacheSet(rasterCache, key, r);
   }
   return r;
 }
@@ -39,7 +49,7 @@ export function rasterUri(key: string, make: () => Raster, displayW: number): st
   let uri = uriCache.get(uriKey);
   if (!uri) {
     uri = pngDataUri(scaleRaster(base, k));
-    uriCache.set(uriKey, uri);
+    cacheSet(uriCache, uriKey, uri);
   }
   return uri;
 }

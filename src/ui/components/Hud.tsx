@@ -14,6 +14,7 @@ import { cellOf, formatDistance, haversine } from '../../game/geo.ts';
 import { fog } from '../../game/fog.ts';
 import { cityPercent } from '../../game/cities.ts';
 import { mapController, useFollowing } from '../../map/controller.ts';
+import { resolveAvatar } from '../../sprites/avatar.ts';
 import { POI_INFO, RARITY_INFO } from '../../sprites/items.ts';
 import type { Tab, Toast } from '../../game/types.ts';
 import { BadgeImg, CharacterSprite, CoinImg, Icon } from './Sprites.tsx';
@@ -183,7 +184,7 @@ export function PlayerChip() {
   return (
     <PxBox style={styles.playerChip} testID="player-chip">
       <CharacterSprite
-        characterId={profile.characterId}
+        avatar={resolveAvatar(profile)}
         modality={profile.modality}
         animate={false}
         width={48}
@@ -227,12 +228,12 @@ export function CityChip({ style }: { style?: StyleProp<ViewStyle> }) {
   );
 }
 
-/** Botões da direita: centralizar (quando a câmera solta do jogador) e, opcionalmente, zoom. */
-export function SideButtons({ showZoom }: { showZoom: boolean }) {
+/** Botões da direita (embaixo, ao alcance do polegar): centralizar e, opcionalmente, zoom. */
+export function SideButtons({ showZoom, bottom }: { showZoom: boolean; bottom?: number }) {
   const following = useFollowing();
-  const { safeT } = useSafe();
+  const { tabbarH } = useSafe();
   return (
-    <View style={[styles.sideButtons, { top: 96 + safeT }]}>
+    <View style={[styles.sideButtons, { bottom: bottom ?? tabbarH + 16 }]}>
       {!following && (
         <PxButton variant="gold" style={styles.sideBtn} onPress={() => mapController.recenter()} label="Centralizar">
           <Icon name="target" size={24} color={C.ink} accent={C.coral} />
@@ -315,14 +316,16 @@ function ToastView({ toast: t, leaving, afterCity, onGone }: {
   // No original, `.toast.city` também casava com a regra `.city` das Stats (coluna, padding maior, gap 8):
   // o toast de cidade sai com o ícone em cima. Mantido igual.
   const city = t.kind === 'city';
+  const ach = t.kind === 'achievement';
   return (
     <Animated.View style={toastInStyle(v)}>
       <PxBox
         bg={city ? C.mint : t.kind === 'warn' ? C.coral : undefined}
-        color={t.kind === 'coin' ? C.gold : city ? C.ink : undefined}
+        color={t.kind === 'coin' || ach ? C.gold : city ? C.ink : undefined}
         style={[styles.toast, city && styles.toastCity, city && afterCity && { marginTop: 14 }]}
       >
         {t.kind === 'coin' && <CoinImg kind={t.coinKind} size={20} />}
+        {ach && <Icon name="trophy" size={20} color={C.gold} accent={C.cream} />}
         {city && <Icon name="flag" size={20} color={C.ink} accent={C.cream} />}
         {t.kind === 'warn' && <Icon name="bolt" size={20} />}
         <Txt weight={700} size={15} style={styles.shrink}>

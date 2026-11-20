@@ -2,6 +2,7 @@
 // e calcula o percentual explorado = área das células visitadas / área do município.
 import { areaBBox, areaM2, cellSizeM, inBBox, pointInArea, type AreaGeometry, type LngLat } from './geo.ts';
 import { fog } from './fog.ts';
+import { checkAndGrantAchievements } from './achievements.ts';
 import { useGame } from './store.ts';
 import { getKv, setKv } from './persist.ts';
 import { fetchWithTimeout } from './net.ts';
@@ -117,6 +118,7 @@ export async function ensureCityAt(p: LngLat): Promise<string | null> {
       fog.assignPending(cityAtSync);
       recountCities();
       if (isNew) useGame.getState().toast(`Nova cidade descoberta: ${name}!`, 'city');
+      checkAndGrantAchievements();
       return id;
     } catch (err) {
       console.warn('[cidades] geocodificação falhou', err);

@@ -20,17 +20,21 @@ let legacyCells = false;
 let flushing: Promise<void> | null = null;
 let flushAgain = false;
 
-export async function hydrate(): Promise<void> {
+export async function hydrate(keepRecording = false): Promise<void> {
   try {
     const [saved, fogBytes] = await Promise.all([
       storage.getJson<PersistedState>(SAVE_KEY),
       storage.getBytes(FOG_KEY),
     ]);
     if (saved && saved.version === 1) {
-      const live = saved.live ? { ...saved.live, status: 'paused' as const, resumedAt: null } : null;
+      const live =
+        saved.live && !(keepRecording && saved.live.status === 'recording')
+          ? { ...saved.live, status: 'paused' as const, resumedAt: null }
+          : saved.live;
       useGame.setState({
         ...DEFAULT_PERSISTED,
         ...saved,
+        achievements: saved.achievements ?? {},
         live,
         settings: { ...DEFAULT_PERSISTED.settings, ...saved.settings },
       });
@@ -104,14 +108,14 @@ export function saveNow(): Promise<void> {
   return flush();
 }
 
-export function startAutosave(): void {
+export function startAutosave(onBackground?: () => void): void {
   useGame.subscribe((s, prev) => {
     if (!s.hydrated) return;
     if (
       s.profile !== prev.profile || s.wallet !== prev.wallet || s.xp !== prev.xp || s.totals !== prev.totals ||
       s.captures !== prev.captures || s.cities !== prev.cities || s.activities !== prev.activities ||
-      s.settings !== prev.settings || s.coins !== prev.coins || s.live !== prev.live || s.unlocked !== prev.unlocked ||
-      s.route !== prev.route
+      s.achievements !== prev.achievements || s.settings !== prev.settings || s.coins !== prev.coins ||
+      s.live !== prev.live || s.unlocked !== prev.unlocked || s.route !== prev.route
     ) {
       scheduleSave();
     }
@@ -122,7 +126,10 @@ export function startAutosave(): void {
   });
   // No celular o app pode ser morto a qualquer momento depois de sair da tela: salva na saída.
   AppState.addEventListener('change', (state) => {
-    if (state !== 'active') void saveNow();
+    if (state !== 'active') {
+      onBackground?.();
+      void saveNow();
+    }
   });
 }
 

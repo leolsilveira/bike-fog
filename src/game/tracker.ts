@@ -8,6 +8,7 @@ import { fog } from './fog.ts';
 import { pois } from './pois.ts';
 import { spawnCoins, type RoadSampler } from './coins.ts';
 import { bumpCityCells, cityAtSync, ensureCityAt } from './cities.ts';
+import { checkAndGrantAchievements } from './achievements.ts';
 import { useGame } from './store.ts';
 import { haptic, sfx, vibrate } from './audio.ts';
 import { loadTrack, saveTrack } from './persist.ts';
@@ -88,8 +89,9 @@ async function spawnAround(p: LngLat): Promise<void> {
   }
 }
 
-function collectNear(a: LngLat, b: LngLat): void {
+function collectNear(a: LngLat, b: LngLat): boolean {
   const s = useGame.getState();
+  let collected = false;
   for (const coin of s.coins) {
     if (distToSegment(coin, a, b) > COIN_PICKUP_M) continue;
     useGame.getState().collectCoin(coin);
@@ -99,23 +101,28 @@ function collectNear(a: LngLat, b: LngLat): void {
     else sfx.coin();
     vibrate(30);
     useGame.getState().toast(`+${value} · ${COIN_LABEL[coin.kind]}`, 'coin', coin.kind);
+    collected = true;
   }
+  return collected;
 }
 
-function captureNear(a: LngLat, b: LngLat): void {
+function captureNear(a: LngLat, b: LngLat): boolean {
   const s = useGame.getState();
   const found = pois.nearby(b, MAX_CAPTURE_M + haversine(a, b), (poi) => !s.captures[poi.id]);
+  let captured = false;
   for (const { poi } of found) {
     if (distToSegment(poi, a, b) > POI_INFO[poi.category].radius) continue;
     useGame.getState().capturePoi(poi, cityAtSync(poi));
     sfx.capture();
     vibrate([60, 40, 120]);
+    captured = true;
   }
+  return captured;
 }
 
 function persistTrack(force = false): Promise<void> {
   const live = useGame.getState().live;
-  if (!live) return Promise.resolve();
+  if (!live || track.length === trackSavedLen) return Promise.resolve();
   if (force || track.length - trackSavedLen >= 60) {
     trackSavedLen = track.length;
     return saveTrack(live.id, track);
@@ -208,8 +215,10 @@ function revealAndCollect(a: PlayerFix, b: PlayerFix): void {
     cellXpAcc -= cellXp;
     if (cellXp) useGame.getState().addXp(cellXp);
   }
-  collectNear(a, b);
-  captureNear(a, b);
+  const gotCoin = collectNear(a, b);
+  const gotPoi = captureNear(a, b);
+  if (gotCoin || gotPoi) checkAndGrantAchievements();
+  else checkAndGrantAchievements({ throttleMs: 1500 });
 }
 
 /** Restaura a trilha de uma atividade interrompida (o app foi fechado no meio). */

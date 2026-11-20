@@ -4,9 +4,9 @@ import { AppState } from 'react-native';
 import { mapHost } from '../bridge/mapHost.ts';
 import { DEFAULT_CENTER, MAX_ACCURACY_M } from './config.ts';
 import { bearing, haversine, type LngLat } from './geo.ts';
-import { handleFix, resetTrackerAnchor } from './tracker.ts';
+import { finishAndSaveTrack, handleFix, resetTrackerAnchor } from './tracker.ts';
 import { useGame } from './store.ts';
-import { getKv, setKv } from './persist.ts';
+import { getKv, saveNow, setKv } from './persist.ts';
 import { fromExpo, startWatch } from './gpsSource';
 import { setBackgroundSink, startBackgroundLocation, stopBackgroundLocation } from './bgTask';
 import { initSimKeys, type KeyVector } from './simKeys';
@@ -312,9 +312,11 @@ export function initLocation(): void {
     }
   });
 
-  setBackgroundSink((locations) => {
+  setBackgroundSink(async (locations) => {
     const sorted = [...locations].sort((a, b) => a.timestamp - b.timestamp);
     for (const loc of sorted) ingest(fromExpo(loc));
+    // Em segundo plano o iOS pode suspender o processo assim que a task termina: garante o save no disco.
+    if (!appActive) await Promise.all([finishAndSaveTrack(), saveNow()]);
   });
   // registro que sobrou de uma sessão morta no meio da gravação (ela volta pausada)
   if (useGame.getState().live?.status !== 'recording') void stopBackgroundLocation();

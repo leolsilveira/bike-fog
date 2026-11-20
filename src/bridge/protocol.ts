@@ -1,7 +1,13 @@
 // Protocolo da ponte entre o app React Native (host) e o mapa (MapLibre GL JS rodando numa WebView).
 // O mapa é só renderização: toda regra do jogo vive no host. Este arquivo é importado pelos dois lados,
 // então só pode conter tipos (nada de runtime, nada de React Native).
-import type { Coin, LngLat, Modality, PlayerFix } from '../game/types.ts';
+import type { AvatarConfig, Coin, LngLat, Modality, PlayerFix } from '../game/types.ts';
+
+export interface MapProfile {
+  characterId: string;
+  avatar?: AvatarConfig;
+  modality: Modality;
+}
 
 /** Estado de um POI no mapa: capturado (troféu), revelado ("selvagem") ou ainda na névoa ("?"). */
 export type PoiMarkerState = 'captured' | 'wild' | 'fog';
@@ -30,10 +36,11 @@ export type CameraMode = 'map' | 'ride' | 'stats';
 /** Host -> mapa. */
 export type HostToMap =
   /** Primeira mensagem útil: cria o mapa. Mensagens anteriores ficam na fila do mapa. */
-  | { type: 'init'; center: LngLat; mode: CameraMode; live: LiveStatus; profile: { characterId: string; modality: Modality } | null }
+  /** Primeira mensagem útil: cria o mapa. Mensagens anteriores ficam na fila do mapa. */
+  | { type: 'init'; center: LngLat; mode: CameraMode; live: LiveStatus; profile: MapProfile | null }
   /** Modo da câmera (zoom, pitch, opacidade da névoa) e estado da atividade (tilt-shift, vinheta). */
   | { type: 'mode'; mode: CameraMode; live: LiveStatus }
-  | { type: 'profile'; characterId: string; modality: Modality }
+  | { type: 'profile'; characterId: string; avatar?: AvatarConfig; modality: Modality }
   /** Células exploradas (chaves de `geo.cellKey`). `reset` substitui tudo; senão, acrescenta (com animação). */
   | { type: 'cells'; reset: boolean; keys: number[] }
   /** Lista completa de moedas no mundo. */

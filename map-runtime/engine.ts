@@ -6,7 +6,7 @@ import type { Feature, FeatureCollection, LineString, Point } from 'geojson';
 import { buildStyle } from './style.ts';
 import { FogLayer } from './fogLayer.ts';
 import { registerImages } from './images.ts';
-import { cachedCharacterFrame, drawRaster } from './sprite.ts';
+import { cachedAvatarFrame, drawRaster } from './sprite.ts';
 import {
   initKeyboard, isSimulating, onSimFix, player, setGpsTarget, setSimInput, setSimulator, simTeleport, tickPlayer,
 } from './player.ts';
@@ -14,12 +14,13 @@ import { log, send } from './bridge.ts';
 import { PITCH, ZOOM } from '../src/game/config.ts';
 import { angleDiff, haversine, type LngLat } from '../src/game/geo.ts';
 import { frameCount, type Facing } from '../src/sprites/characters.ts';
+import { avatarKey, resolveAvatar } from '../src/sprites/avatar.ts';
 import type { Coin, Modality } from '../src/game/types.ts';
-import type { CameraMode, HostToMap, LiveStatus, PoiMarker } from '../src/bridge/protocol.ts';
+import type { CameraMode, HostToMap, LiveStatus, MapProfile, PoiMarker } from '../src/bridge/protocol.ts';
 
 type InitMsg = Extract<HostToMap, { type: 'init' }>;
 type CameraMsg = Extract<HostToMap, { type: 'camera' }>;
-type Profile = { characterId: string; modality: Modality };
+type Profile = MapProfile;
 
 const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] };
 const TRACK_COLOR: Record<Modality, string> = { bike: '#3fd3a0', run: '#ff6b5a' };
@@ -144,7 +145,7 @@ export class Engine {
         break;
       }
       case 'profile':
-        this.profile = { characterId: msg.characterId, modality: msg.modality };
+        this.profile = { characterId: msg.characterId, avatar: msg.avatar, modality: msg.modality };
         this.applyProfile();
         break;
       case 'cells':
@@ -273,11 +274,14 @@ export class Engine {
   private createMarker(start: LngLat): void {
     const el = document.createElement('div');
     el.className = 'player-marker';
+    const body = document.createElement('div');
+    body.className = 'player-body';
     const shadow = document.createElement('div');
     shadow.className = 'player-shadow';
     const canvas = document.createElement('canvas');
     canvas.className = 'player-sprite';
-    el.append(shadow, canvas);
+    body.append(shadow, canvas);
+    el.append(body);
     el.style.visibility = 'hidden'; // aparece quando houver posição
     this.spriteCanvas = canvas;
     this.marker = new Marker({ element: el, anchor: 'bottom', pitchAlignment: 'viewport', rotationAlignment: 'viewport' })
@@ -782,10 +786,11 @@ export class Engine {
     const moving = player.speed > 0.35;
     const stepLen = profile.modality === 'run' ? 0.85 : 1.7;
     const frame = moving ? Math.floor(player.odometer / stepLen) % frameCount(profile.modality) : -1;
-    const key = `${profile.characterId}|${profile.modality}|${facing}|${frame}`;
+    const avatar = resolveAvatar(profile);
+    const key = `${avatarKey(avatar)}|${profile.modality}|${facing}|${frame}`;
     if (key === this.spriteKey) return;
     this.spriteKey = key;
-    drawRaster(this.spriteCanvas, cachedCharacterFrame(profile.characterId, profile.modality, facing, frame));
+    drawRaster(this.spriteCanvas, cachedAvatarFrame(avatar, profile.modality, facing, frame));
   }
 
   // ---------------------------------------------------------------------------

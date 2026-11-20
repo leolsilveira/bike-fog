@@ -1,21 +1,23 @@
 // Tela de Stats (por cima do mapa, com rolagem): perfil e nível, totais, cidades, coleção estilo pokédex,
 // histórico com exportação GPX e ajustes. Port de legacy/src/ui/screens/StatsScreen.tsx + global.css.
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Animated, Linking, Pressable, ScrollView, StyleSheet, useWindowDimensions, View, type LayoutChangeEvent,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useGame } from '../../game/store.ts';
 import { levelFromXp } from '../../game/progression.ts';
+import { buildAchievementOverview } from '../../game/achievements.ts';
 import { cityPercent } from '../../game/cities.ts';
 import { wipeAll } from '../../game/persist.ts';
 import { exportGpx } from '../../game/gpx.ts';
+import { exportAllActivities, importActivitiesFromFile, type ImportProgress } from '../../game/activitiesTransfer.ts';
 import { cellSizeM, formatArea, formatDistance, formatDuration } from '../../game/geo.ts';
 import { sfx } from '../../game/audio.ts';
 import { GAME_NAME } from '../../game/config.ts';
 // sem extensão: há variante .web.ts
 import { confirmAsync } from '../../services/confirm';
-import { characterById } from '../../sprites/characters.ts';
+import { resolveAvatar } from '../../sprites/avatar.ts';
 import { POI_CATEGORIES, POI_INFO, poiIcon, RARITY_INFO, type PoiCategory } from '../../sprites/items.ts';
 import { iconRaster, type IconName } from '../../sprites/icons.ts';
 import type { Raster } from '../../sprites/pixel.ts';
@@ -195,9 +197,14 @@ export function StatsScreen() {
   const cities = useGame((s) => s.cities);
   const captures = useGame((s) => s.captures);
   const activities = useGame((s) => s.activities);
+  const live = useGame((s) => s.live);
+  const achievements = useGame((s) => s.achievements);
   const fix = useGame((s) => s.fix);
   const pushModal = useGame((s) => s.pushModal);
   const [showAll, setShowAll] = useState(false);
+  const [transferring, setTransferring] = useState<'import' | 'export' | null>(null);
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
+  const cancelImportRef = useRef(false);
   const { width } = useWindowDimensions();
   const { safeT, tabbarH } = useSafe();
 
@@ -207,10 +214,14 @@ export function StatsScreen() {
     for (const c of capList) m[c.category] = (m[c.category] ?? 0) + 1;
     return m;
   }, [capList]);
+  const achOverview = useMemo(
+    () => buildAchievementOverview({ totals, cities, captures, activities, live, achievements }),
+    [totals, cities, captures, activities, live, achievements],
+  );
 
   if (!profile) return null;
   const lvl = levelFromXp(xp);
-  const def = characterById(profile.characterId);
+  const avatar = resolveAvatar(profile);
   const cityList = Object.values(cities).sort((a, b) => cityPercent(b) - cityPercent(a));
   const areaTotal = totals.cells * cellSizeM(fix?.lat ?? -23.5) ** 2;
   // media queries do original: totais em 3 colunas a partir de 520 px, coleção em 10 a partir de 720 px
@@ -234,6 +245,34 @@ export function StatsScreen() {
     useGame.getState().resetProgress();
   };
 
+  const runExport = async () => {
+    if (transferring) return;
+    sfx.click();
+    setTransferring('export');
+    try {
+      await exportAllActivities();
+    } finally {
+      setTransferring(null);
+    }
+  };
+
+  const runImport = async () => {
+    if (transferring) return;
+    sfx.click();
+    cancelImportRef.current = false;
+    setTransferring('import');
+    setImportProgress({ percent: 0, label: 'Selecionando arquivo…' });
+    try {
+      await importActivitiesFromFile({
+        onProgress: (p) => setImportProgress(p),
+        isCancelled: () => cancelImportRef.current,
+      });
+    } finally {
+      setTransferring(null);
+      setImportProgress(null);
+    }
+  };
+
   return (
     <View style={styles.screen}>
       {/* linear-gradient(rgba(29,23,48,.94), rgba(29,23,48,.98)) sobre as listras de 45°: as listras ficam abaixo
@@ -246,7 +285,7 @@ export function StatsScreen() {
       >
         <View style={styles.inner}>
           <PxBox style={styles.profileCard} testID="profile-card">
-            <CharacterSprite characterId={profile.characterId} modality={profile.modality} facing="down" width={96} />
+            <CharacterSprite avatar={avatar} modality={profile.modality} facing="down" width={96} />
             <View style={styles.profileBody}>
               <Arcade size={15} spacing={0} lh={1.4}>
                 {profile.name}
@@ -268,10 +307,10 @@ export function StatsScreen() {
                   <CoinImg size={16} /> {wallet.toLocaleString('pt-BR')}
                 </Chip>
                 <Chip>
-                  <Icon name={profile.modality} size={16} /> {def.name}
+                  <Icon name={profile.modality} size={16} /> {profile.modality === 'bike' ? 'Ciclismo' : 'Corrida'}
                 </Chip>
-                <PxButton size="small" variant="sky" onPress={() => pushModal({ type: 'characters' })}>
-                  Trocar herói
+                <PxButton size="small" variant="sky" onPress={() => pushModal({ type: 'avatar' })} testID="edit-avatar">
+                  Editar avatar
                 </PxButton>
               </View>
             </View>
@@ -297,6 +336,73 @@ export function StatsScreen() {
                 </View>
               ))}
             </View>
+          </Section>
+
+          <Section icon="medal" title="CONQUISTAS">
+            <PxBox style={styles.achCard} testID="achievements-summary">
+              <View style={styles.achHead}>
+                <View style={styles.shrink}>
+                  <Arcade size={13} spacing={0} color={C.gold}>
+                    {achOverview.unlockedCount} {achOverview.unlockedCount === 1 ? 'CONQUISTA' : 'CONQUISTAS'}
+                  </Arcade>
+                  <Txt size={13} color={C.muted}>
+                    {achOverview.fixedUnlockedTiers} de {achOverview.fixedTotalTiers} marcos fixos
+                  </Txt>
+                </View>
+                <Chip>
+                  <CoinImg size={14} /> +{achOverview.totalCoinsEarned.toLocaleString('pt-BR')}
+                </Chip>
+              </View>
+              <Bar
+                percent={
+                  achOverview.fixedTotalTiers > 0
+                    ? (achOverview.fixedUnlockedTiers / achOverview.fixedTotalTiers) * 100
+                    : 0
+                }
+                variant="gold"
+                height={11}
+              />
+              {achOverview.almostThere.length > 0 && (
+                <View style={styles.achPreviewList}>
+                  {achOverview.almostThere.map((it) => (
+                    <PxCell key={it.id} style={styles.achPreviewItem}>
+                      <Icon name={it.icon} size={20} color={C.gold} accent={C.cream} />
+                      <View style={styles.achPreviewBody}>
+                        <View style={styles.achPreviewTop}>
+                          <Txt weight={700} size={14} numberOfLines={1} style={styles.shrink}>
+                            {it.title}
+                          </Txt>
+                          {it.nextCoins != null && (
+                            <View style={styles.achPreviewCoins}>
+                              <CoinImg size={12} />
+                              <Arcade size={9} spacing={0} color={C.gold}>
+                                +{it.nextCoins}
+                              </Arcade>
+                            </View>
+                          )}
+                        </View>
+                        <Bar percent={it.percent} variant="mint" height={7} />
+                        <Txt size={12} color={C.muted}>
+                          {it.progressLabel}
+                        </Txt>
+                      </View>
+                    </PxCell>
+                  ))}
+                </View>
+              )}
+              <PxButton
+                size="small"
+                variant="gold"
+                block
+                testID="open-achievements"
+                onPress={() => {
+                  sfx.click();
+                  pushModal({ type: 'achievements' });
+                }}
+              >
+                Ver todas as conquistas
+              </PxButton>
+            </PxBox>
           </Section>
 
           <Section icon="flag" title="CIDADES DESBLOQUEADAS">
@@ -418,6 +524,57 @@ export function StatsScreen() {
                 label="Modo simulador"
                 desc="GPS virtual para testar no computador: joystick, WASD/setas, Shift = turbo, botão direito/toque longo no mapa = teletransporte."
               />
+              <Setting
+                title="Importar atividades"
+                desc="Carrega um .zip do Strava ou arquivo .gpx para revelar o mapa (não altera XP nem nível)."
+              >
+                {transferring === 'import' ? (
+                  <PxButton
+                    size="small"
+                    variant="coral"
+                    onPress={() => {
+                      cancelImportRef.current = true;
+                    }}
+                  >
+                    Cancelar
+                  </PxButton>
+                ) : (
+                  <PxButton
+                    size="small"
+                    variant="mint"
+                    disabled={transferring !== null}
+                    onPress={() => void runImport()}
+                  >
+                    Importar
+                  </PxButton>
+                )}
+              </Setting>
+              {importProgress && (
+                <View style={styles.importProgress}>
+                  <View style={styles.importProgressHead}>
+                    <Txt size={13} color={C.cream} style={styles.shrink} numberOfLines={1}>
+                      {importProgress.label}
+                    </Txt>
+                    <Arcade size={10} spacing={0} color={C.mint}>
+                      {Math.round(importProgress.percent)}%
+                    </Arcade>
+                  </View>
+                  <Bar percent={importProgress.percent} variant="mint" height={12} />
+                </View>
+              )}
+              <Setting
+                title="Exportar atividades"
+                desc="Salva todas as trilhas gravadas em um arquivo .zip no formato GPX."
+              >
+                <PxButton
+                  size="small"
+                  variant="sky"
+                  disabled={transferring !== null || activities.length === 0}
+                  onPress={() => void runExport()}
+                >
+                  {transferring === 'export' ? 'Exportando…' : 'Exportar'}
+                </PxButton>
+              </Setting>
               <Setting title="Apagar progresso" desc="Remove névoa revelada, capturas, moedas e histórico deste aparelho.">
                 <PxButton size="small" variant="coral" onPress={() => void wipe()}>
                   Apagar
@@ -465,6 +622,15 @@ const styles = StyleSheet.create({
   cityTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 },
   empty: { padding: 16 },
 
+  // conquistas
+  achCard: { gap: 10, padding: 14 },
+  achHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10 },
+  achPreviewList: { gap: 8 },
+  achPreviewItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, paddingHorizontal: 10 },
+  achPreviewBody: { flex: 1, minWidth: 0, gap: 4 },
+  achPreviewTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+  achPreviewCoins: { flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 0 },
+
   dexCol: { flex: 1, minWidth: 0 },
   dexCell: { flex: 1, alignItems: 'center', gap: 3, paddingTop: 8, paddingHorizontal: 2, paddingBottom: 6 },
 
@@ -477,6 +643,8 @@ const styles = StyleSheet.create({
   settings: { gap: 2, paddingVertical: 6, paddingHorizontal: 14 },
   setting: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingVertical: 12 },
   settingText: { flexShrink: 1 },
+  importProgress: { gap: 6, paddingBottom: 12 },
+  importProgressHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   dashed: { height: 2, flexDirection: 'row', justifyContent: 'space-between', overflow: 'hidden' },
   dash: { width: 6, height: 2, backgroundColor: C.panel3 },
   switch: { width: 54, height: 28, flexShrink: 0, backgroundColor: C.ink },
