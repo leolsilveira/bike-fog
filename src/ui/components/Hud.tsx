@@ -82,9 +82,12 @@ const ORB_PULSE = [C.coral, mix(C.coral, '#ff8a7a', 0.5), '#ff8a7a', mix(C.coral
 export function TabBar() {
   const tab = useGame((s) => s.tab);
   const setTab = useGame((s) => s.setTab);
-  const recording = useGame((s) => s.live?.status === 'recording');
+  const live = useGame((s) => s.live);
+  const recording = live?.status === 'recording';
   const { safeB } = useSafe();
   const pulse = useStepper(300, 4, recording);
+  // Durante uma atividade na aba Gravar, esconde o menu inferior para manter a tela limpa.
+  if (tab === 'record' && live) return null;
   return (
     <View style={[styles.tabbar, { height: M.tabbarH + safeB }]} testID="tabbar">
       <LinearGradient
@@ -202,12 +205,12 @@ export function CityChip({ style }: { style?: StyleProp<ViewStyle> }) {
   );
 }
 
-/** Botões da direita: centralizar (quando a câmera solta do jogador) e, opcionalmente, zoom. */
-export function SideButtons({ showZoom }: { showZoom: boolean }) {
+/** Botões da direita (embaixo, ao alcance do polegar): centralizar e, opcionalmente, zoom. */
+export function SideButtons({ showZoom, bottom }: { showZoom: boolean; bottom?: number }) {
   const following = useFollowing();
-  const { safeT } = useSafe();
+  const { tabbarH } = useSafe();
   return (
-    <View style={[styles.sideButtons, { top: 96 + safeT }]}>
+    <View style={[styles.sideButtons, { bottom: bottom ?? tabbarH + 16 }]}>
       {!following && (
         <PxButton variant="gold" style={styles.sideBtn} onPress={() => mapController.recenter()} label="Centralizar">
           <Icon name="target" size={24} color={C.ink} accent={C.coral} />
@@ -427,7 +430,9 @@ function PoiCardInner() {
   const selected = useGame((s) => s.selected)!;
   const select = useGame((s) => s.select);
   const capture = useGame((s) => s.captures[selected.id]);
-  const { tabbarH } = useSafe();
+  const tab = useGame((s) => s.tab);
+  const hasLive = useGame((s) => s.live != null);
+  const { safeB, tabbarH } = useSafe();
   const v = useToastIn(200);
   useNow(1000);
   const info = POI_INFO[selected.category];
@@ -442,8 +447,9 @@ function PoiCardInner() {
       : dist != null && dist <= info.radius
         ? 'Você está aqui! Inicie uma atividade para capturar.'
         : `Chegue a ${info.radius} m durante uma atividade para capturar.`;
+  const cardBottom = tab === 'record' && hasLive ? safeB + 90 : tabbarH + 14;
   return (
-    <Animated.View style={[styles.poiWrap, { bottom: tabbarH + 14 }, toastInStyle(v)]}>
+    <Animated.View style={[styles.poiWrap, { bottom: cardBottom }, toastInStyle(v)]}>
       <PxBox style={styles.poiCard} testID="poi-card">
         <BadgeImg category={selected.category} state={capture ? 'captured' : revealed ? 'wild' : 'fog'} width={60} />
         <View style={styles.poiInfo}>

@@ -43,6 +43,7 @@ export class Engine {
   private marker: Marker | null = null;
   private spriteCanvas: HTMLCanvasElement | null = null;
   private spriteKey = '';
+  private markerScale = '';
   private loaded = false;
 
   // estado espelhado do host
@@ -237,11 +238,14 @@ export class Engine {
     const el = document.createElement('div');
     el.className = 'player-marker';
     el.classList.toggle('is-record', this.mode === 'record');
+    const body = document.createElement('div');
+    body.className = 'player-body';
     const shadow = document.createElement('div');
     shadow.className = 'player-shadow';
     const canvas = document.createElement('canvas');
     canvas.className = 'player-sprite';
-    el.append(shadow, canvas);
+    body.append(shadow, canvas);
+    el.append(body);
     el.style.visibility = 'hidden'; // aparece quando houver posição
     this.spriteCanvas = canvas;
     this.marker = new Marker({ element: el, anchor: 'bottom', pitchAlignment: 'viewport', rotationAlignment: 'viewport' })
@@ -582,6 +586,15 @@ export class Engine {
     if (this.mode === 'record' && player.speed > 0.3) {
       this.camBearing =
         (this.camBearing + angleDiff(this.camBearing, player.heading) * Math.min(1, (dt / 1000) * 2.2) + 360) % 360;
+    }
+
+    if (this.marker) {
+      const refZoom = this.mode === 'record' ? ZOOM.record : ZOOM.map;
+      const scale = Math.max(0.45, Math.min(1.15, Math.pow(1.22, map.getZoom() - refZoom))).toFixed(2);
+      if (scale !== this.markerScale) {
+        this.markerScale = scale;
+        this.marker.getElement().style.setProperty('--player-scale', scale);
+      }
     }
 
     if (this.mode !== 'stats' && this.following && !this.interacting && !this.pressed && t > this.transitionUntil) {
