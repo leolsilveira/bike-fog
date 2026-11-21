@@ -196,10 +196,27 @@ export interface Toast {
   coinKind?: CoinKind;
 }
 
+export interface MigrationSummary {
+  activities: number;
+  cells: number;
+  captures: number;
+  xp: number;
+  displayName?: string;
+}
+
+export interface PendingMigration {
+  userId: string;
+  email: string | null;
+  local: MigrationSummary;
+  cloud: MigrationSummary;
+}
+
 export type Modal =
   | { type: 'capture'; capture: Capture; xp: number }
   | { type: 'levelup'; level: number; title: string }
   | { type: 'achievement'; unlock: AchievementUnlockEvent }
   | { type: 'achievements' }
   | { type: 'summary'; activity: ActivitySummary }
-  | { type: 'avatar' };
+  | { type: 'avatar' }
+  | { type: 'auth' }
+  | { type: 'migration' };

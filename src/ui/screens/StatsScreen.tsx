@@ -2,7 +2,8 @@
 // histórico com exportação GPX e ajustes. Port de legacy/src/ui/screens/StatsScreen.tsx + global.css.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  Animated, Linking, Pressable, ScrollView, StyleSheet, useWindowDimensions, View, type LayoutChangeEvent,
+  Animated, Linking, Platform, Pressable, ScrollView, StyleSheet, TextInput, useWindowDimensions, View,
+  type LayoutChangeEvent, type TextStyle,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useGame } from '../../game/store.ts';
@@ -17,14 +18,17 @@ import { sfx } from '../../game/audio.ts';
 import { GAME_NAME } from '../../game/config.ts';
 // sem extensão: há variante .web.ts
 import { confirmAsync } from '../../services/confirm';
+import { mapAuthError, signOutAndReset, updateProfileSettings } from '../../services/auth.ts';
+import { isSupabaseConfigured } from '../../services/supabase.ts';
+import { pushAllLocalToCloud } from '../../services/sync.ts';
 import { resolveAvatar } from '../../sprites/avatar.ts';
 import { POI_CATEGORIES, POI_INFO, poiIcon, RARITY_INFO, type PoiCategory } from '../../sprites/items.ts';
 import { iconRaster, type IconName } from '../../sprites/icons.ts';
 import type { Raster } from '../../sprites/pixel.ts';
 import type { Modality, Settings } from '../../game/types.ts';
 import { BadgeImg, CharacterSprite, CoinImg, Icon, PixelImage, PoiIconImg } from '../components/Sprites.tsx';
-import { Arcade, Bar, Chip, PxBox, PxButton, PxCell, Txt } from '../components/Px.tsx';
-import { C, FILL, useSafe } from '../theme.ts';
+import { Arcade, Bar, Chip, Inset, PxBox, PxButton, PxCell, PxOutline, Txt } from '../components/Px.tsx';
+import { C, FILL, uiFont, useSafe } from '../theme.ts';
 
 /** Quebra uma lista em linhas de `n` (as grades do CSS viram linhas de flex com colunas iguais). */
 function rows<T>(items: T[], n: number): T[][] {
@@ -115,7 +119,9 @@ function DashedLine() {
 }
 
 /** Interruptor `.switch`: o pino anda 26 px em 3 degraus (transition 120ms steps(3)). */
-function Switch({ value, label, onPress }: { value: boolean; label: string; onPress: () => void }) {
+function Switch({
+  value, label, onPress, testID,
+}: { value: boolean; label: string; onPress: () => void; testID?: string }) {
   const [x] = useState(() => new Animated.Value(value ? 1 : 0));
   useEffect(() => {
     const a = Animated.timing(x, {
@@ -133,6 +139,7 @@ function Switch({ value, label, onPress }: { value: boolean; label: string; onPr
       accessibilityState={{ checked: value }}
       accessibilityLabel={label}
       onPress={onPress}
+      testID={testID}
       style={[styles.switch, value && styles.switchOn]}
     >
       <View style={styles.switchFrame} />
@@ -201,10 +208,27 @@ export function StatsScreen() {
   const achievements = useGame((s) => s.achievements);
   const fix = useGame((s) => s.fix);
   const pushModal = useGame((s) => s.pushModal);
+  const toast = useGame((s) => s.toast);
+  const authUserId = useGame((s) => s.authUserId);
+  const authEmail = useGame((s) => s.authEmail);
+  const syncing = useGame((s) => s.syncing);
+  const lastSyncError = useGame((s) => s.lastSyncError);
+  const lastSyncedAt = useGame((s) => s.lastSyncedAt);
+  const pendingMigration = useGame((s) => s.pendingMigration);
+  const pendingInviteUsername = useGame((s) => s.pendingInviteUsername);
+
   const [showAll, setShowAll] = useState(false);
   const [transferring, setTransferring] = useState<'import' | 'export' | null>(null);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
   const cancelImportRef = useRef(false);
+  const [usernameDraft, setUsernameDraft] = useState<string | null>(null);
+  const [isPublicDraft, setIsPublicDraft] = useState<boolean | null>(null);
+  const [usernameFocused, setUsernameFocused] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileMsg, setProfileMsg] = useState<string | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const { width } = useWindowDimensions();
   const { safeT, tabbarH } = useSafe();
 
@@ -220,6 +244,8 @@ export function StatsScreen() {
   );
 
   if (!profile) return null;
+  const effectiveUsername = usernameDraft ?? (profile.username ?? '');
+  const effectiveIsPublic = isPublicDraft ?? (profile.isPublic ?? true);
   const lvl = levelFromXp(xp);
   const avatar = resolveAvatar(profile);
   const cityList = Object.values(cities).sort((a, b) => cityPercent(b) - cityPercent(a));
@@ -243,6 +269,57 @@ export function StatsScreen() {
     if (!ok) return;
     await wipeAll();
     useGame.getState().resetProgress();
+  };
+
+  const saveProfileIdentity = async () => {
+    if (savingProfile) return;
+    sfx.click();
+    setProfileMsg(null);
+    setProfileError(null);
+    setSavingProfile(true);
+    try {
+      await updateProfileSettings({
+        ...(effectiveUsername.trim().length > 0 ? { username: effectiveUsername } : {}),
+        isPublic: effectiveIsPublic,
+      });
+      setUsernameDraft(null);
+      setIsPublicDraft(null);
+      setProfileMsg(authUserId ? 'Perfil atualizado na nuvem!' : 'Perfil salvo neste aparelho.');
+    } catch (err) {
+      setProfileError(mapAuthError(err));
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const syncNow = async () => {
+    if (syncBusy || syncing) return;
+    sfx.click();
+    setSyncBusy(true);
+    try {
+      await pushAllLocalToCloud();
+      toast('Sincronizado com a nuvem!', 'info');
+    } catch (err) {
+      toast(mapAuthError(err), 'warn');
+    } finally {
+      setSyncBusy(false);
+    }
+  };
+
+  const logout = async () => {
+    if (loggingOut) return;
+    const ok = await confirmAsync(
+      'Sair da conta?',
+      'Os dados locais deste aparelho serão limpos. Seu progresso na nuvem continua seguro.',
+      'Sair',
+    );
+    if (!ok) return;
+    setLoggingOut(true);
+    try {
+      await signOutAndReset();
+    } finally {
+      setLoggingOut(false);
+    }
   };
 
   const runExport = async () => {
@@ -290,6 +367,11 @@ export function StatsScreen() {
               <Arcade size={15} spacing={0} lh={1.4}>
                 {profile.name}
               </Arcade>
+              {profile.username ? (
+                <Txt size={13} weight={700} color={C.sky}>
+                  @{profile.username}
+                </Txt>
+              ) : null}
               <Txt color={C.gold} weight={700}>
                 Nível {lvl.level} · {lvl.title}
               </Txt>
@@ -315,6 +397,163 @@ export function StatsScreen() {
               </View>
             </View>
           </PxBox>
+
+          <Section icon="cloud" title="CONTA E SINCRONIZAÇÃO">
+            <PxBox style={styles.accountCard}>
+              {authUserId ? (
+                <View style={styles.accountStatusRow}>
+                  <Chip dot={C.mint} testID="auth-status-email">
+                    {authEmail ?? 'Conta conectada'}
+                  </Chip>
+                  <Txt size={12} color={lastSyncError ? C.coral : C.muted}>
+                    {syncing
+                      ? 'Sincronizando…'
+                      : lastSyncError
+                        ? `Erro: ${lastSyncError}`
+                        : lastSyncedAt
+                          ? `Última sincronização: ${shortDateTime(lastSyncedAt)}`
+                          : 'Conectado à nuvem'}
+                  </Txt>
+                </View>
+              ) : (
+                <View style={styles.accountGuest}>
+                  <Txt size={14} color={C.muted}>
+                    Modo convidado (local) — entre com e-mail e senha para salvar seu progresso na nuvem.
+                  </Txt>
+                  {isSupabaseConfigured() && (
+                    <PxButton
+                      variant="gold"
+                      block
+                      onPress={() => {
+                        sfx.click();
+                        pushModal({ type: 'auth' });
+                      }}
+                      testID="auth-open-btn"
+                    >
+                      Entrar / Salvar na nuvem
+                    </PxButton>
+                  )}
+                </View>
+              )}
+
+              {pendingInviteUsername ? (
+                <View style={styles.accountStatusRow}>
+                  <Chip dot={C.sky}>Convite salvo: @{pendingInviteUsername}</Chip>
+                </View>
+              ) : null}
+
+              {pendingMigration ? (
+                <PxButton
+                  size="small"
+                  variant="gold"
+                  block
+                  onPress={() => {
+                    sfx.click();
+                    pushModal({ type: 'migration' });
+                  }}
+                >
+                  Resolver conflito de migração
+                </PxButton>
+              ) : null}
+
+              <DashedLine />
+
+              <View style={styles.usernameField}>
+                <Txt weight={700} size={13} upper spacing={0.04} color={C.muted}>
+                  @username
+                </Txt>
+                <View style={styles.inputBox}>
+                  <Inset side="top" h={3} color={C.cream2} />
+                  <PxOutline color={usernameFocused ? C.gold : C.ink} />
+                  <TextInput
+                    value={effectiveUsername}
+                    onChangeText={(v) => {
+                      setUsernameDraft(v);
+                      if (profileError) setProfileError(null);
+                      if (profileMsg) setProfileMsg(null);
+                    }}
+                    maxLength={24}
+                    placeholder="ex: ciclista_sp"
+                    placeholderTextColor="#757575"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    spellCheck={false}
+                    onFocus={() => setUsernameFocused(true)}
+                    onBlur={() => setUsernameFocused(false)}
+                    cursorColor={C.ink}
+                    underlineColorAndroid="transparent"
+                    accessibilityLabel="Nome de usuário"
+                    style={styles.input}
+                    testID="username-input"
+                  />
+                </View>
+              </View>
+
+              <Setting
+                first
+                title="Perfil público"
+                desc="Permite aparecer na busca de amigos e no ranking global."
+              >
+                <Switch
+                  value={effectiveIsPublic}
+                  label="Perfil público"
+                  testID="profile-public-toggle"
+                  onPress={() => {
+                    sfx.click();
+                    setIsPublicDraft(!effectiveIsPublic);
+                    setProfileMsg(null);
+                    setProfileError(null);
+                  }}
+                />
+              </Setting>
+
+              {profileError ? (
+                <Txt size={13} weight={700} color={C.coral}>
+                  {profileError}
+                </Txt>
+              ) : profileMsg ? (
+                <Txt size={13} weight={700} color={C.mint}>
+                  {profileMsg}
+                </Txt>
+              ) : null}
+
+              <View style={styles.accountActions}>
+                <PxButton
+                  size="small"
+                  variant="sky"
+                  disabled={savingProfile}
+                  onPress={() => void saveProfileIdentity()}
+                  style={styles.accountBtn}
+                  testID="profile-save-btn"
+                >
+                  {savingProfile ? 'Salvando…' : 'Salvar perfil'}
+                </PxButton>
+                {authUserId ? (
+                  <>
+                    <PxButton
+                      size="small"
+                      variant="mint"
+                      disabled={syncing || syncBusy}
+                      onPress={() => void syncNow()}
+                      style={styles.accountBtn}
+                    >
+                      {syncing || syncBusy ? 'Sincronizando…' : 'Sincronizar agora'}
+                    </PxButton>
+                    <PxButton
+                      size="small"
+                      variant="coral"
+                      disabled={loggingOut}
+                      onPress={() => void logout()}
+                      style={styles.accountBtn}
+                      testID="logout-btn"
+                    >
+                      {loggingOut ? 'Saindo…' : 'Sair da conta'}
+                    </PxButton>
+                  </>
+                ) : null}
+              </View>
+            </PxBox>
+          </Section>
 
           <Section icon="trophy" title="TOTAIS">
             <View style={styles.grid10}>
@@ -607,6 +846,28 @@ const styles = StyleSheet.create({
   profileBody: { flex: 1, minWidth: 0 },
   xpline: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8, marginBottom: 4 },
   profileRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+
+  // conta e sincronização
+  accountCard: { gap: 10, padding: 14 },
+  accountStatusRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  accountGuest: { gap: 10 },
+  usernameField: { gap: 6 },
+  inputBox: { backgroundColor: C.cream },
+  input: {
+    height: 42,
+    paddingHorizontal: 12,
+    paddingVertical: 0,
+    margin: 0,
+    borderWidth: 0,
+    ...(Platform.OS === 'web' ? { outlineStyle: 'none' } : null),
+    fontFamily: uiFont(700),
+    fontSize: 16,
+    color: C.ink,
+    textAlignVertical: 'center',
+    ...(Platform.OS === 'android' ? { includeFontPadding: false } : null),
+  } as TextStyle,
+  accountActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  accountBtn: { flexGrow: 1 },
 
   // seções
   h3: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },

@@ -8,6 +8,9 @@ import { DEFAULT_AVATAR, type AvatarConfig } from '../../sprites/avatar.ts';
 import type { Modality } from '../../sprites/characters.ts';
 import { useGame } from '../../game/store.ts';
 import { sfx } from '../../game/audio.ts';
+import {
+  mapAuthError, suggestUsernameFromName, updateProfileSettings, validateUsername,
+} from '../../services/auth.ts';
 import { AvatarCustomizer } from '../components/AvatarCustomizer.tsx';
 import { CharacterSprite, Icon } from '../components/Sprites.tsx';
 import { Arcade, Chip, Inset, PxBox, PxButton, PxOutline, Txt } from '../components/Px.tsx';
@@ -27,12 +30,16 @@ const STEPS: readonly { id: Step; label: string; title: string }[] = [
 
 export function CreateScreen() {
   const createProfile = useGame((s) => s.createProfile);
+  const authUserId = useGame((s) => s.authUserId);
   const { safeT, safeB } = useSafe();
   const [step, setStep] = useState<Step>(0);
   const [modality, setModality] = useState<Modality>('bike');
   const [avatar, setAvatar] = useState<AvatarConfig>(DEFAULT_AVATAR);
   const [name, setName] = useState('');
-  const [focused, setFocused] = useState(false);
+  const [username, setUsername] = useState('');
+  const [focused, setFocused] = useState<'name' | 'username' | null>(null);
+  const [usernameError, setUsernameError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const scroll = useRef<ScrollView>(null);
 
   // Com o teclado aberto na etapa final, rola até o campo e botão.
@@ -63,9 +70,38 @@ export function CreateScreen() {
     setModality(m);
   };
 
-  const start = () => {
+  const suggestedUsername = !username.trim() && name.trim() ? suggestUsernameFromName(name) : '';
+
+  const start = async () => {
+    if (submitting) return;
+    setUsernameError(null);
+    let cleanUsername: string | undefined;
+    if (username.trim().length > 0) {
+      const check = validateUsername(username);
+      if (!check.ok) {
+        setUsernameError(check.error);
+        return;
+      }
+      cleanUsername = check.username;
+    }
+
+    if (authUserId && cleanUsername) {
+      setSubmitting(true);
+      try {
+        await updateProfileSettings({
+          username: cleanUsername,
+          displayName: name.trim() || 'Viajante',
+        });
+      } catch (err) {
+        setUsernameError(mapAuthError(err));
+        setSubmitting(false);
+        return;
+      }
+      setSubmitting(false);
+    }
+
     sfx.capture();
-    createProfile(name, avatar, modality);
+    createProfile(name, avatar, modality, 'custom', cleanUsername ? { username: cleanUsername } : undefined);
   };
 
   const current = STEPS[step];
@@ -214,7 +250,7 @@ export function CreateScreen() {
                   </Txt>
                   <View style={styles.inputBox}>
                     <Inset side="top" h={3} color={C.cream2} />
-                    <PxOutline color={focused ? C.gold : C.ink} />
+                    <PxOutline color={focused === 'name' ? C.gold : C.ink} />
                     <TextInput
                       value={name}
                       onChangeText={setName}
@@ -226,10 +262,9 @@ export function CreateScreen() {
                       autoCorrect={false}
                       spellCheck={false}
                       autoCapitalize="words"
-                      returnKeyType="go"
-                      onSubmitEditing={start}
-                      onFocus={() => setFocused(true)}
-                      onBlur={() => setFocused(false)}
+                      returnKeyType="next"
+                      onFocus={() => setFocused('name')}
+                      onBlur={() => setFocused(null)}
                       cursorColor={C.ink}
                       underlineColorAndroid="transparent"
                       accessibilityLabel="Seu apelido"
@@ -239,18 +274,76 @@ export function CreateScreen() {
                   </View>
                 </View>
 
+                <View style={styles.field}>
+                  <View style={styles.labelRow}>
+                    <Txt weight={700} size={14} spacing={0.05} upper color={C.muted}>
+                      @username (opcional)
+                    </Txt>
+                    {suggestedUsername ? (
+                      <Pressable
+                        onPress={() => {
+                          sfx.click();
+                          setUsername(suggestedUsername);
+                          setUsernameError(null);
+                        }}
+                        accessibilityRole="button"
+                      >
+                        <Txt size={12} weight={700} color={C.sky}>
+                          Usar @{suggestedUsername}
+                        </Txt>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                  <View style={styles.inputBox}>
+                    <Inset side="top" h={3} color={C.cream2} />
+                    <PxOutline color={focused === 'username' ? C.gold : C.ink} />
+                    <TextInput
+                      value={username}
+                      onChangeText={(v) => {
+                        setUsername(v);
+                        if (usernameError) setUsernameError(null);
+                      }}
+                      maxLength={24}
+                      placeholder={suggestedUsername ? `ex: ${suggestedUsername}` : 'ex: ciclista_sp'}
+                      placeholderTextColor="#757575"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      spellCheck={false}
+                      returnKeyType="go"
+                      onSubmitEditing={() => void start()}
+                      onFocus={() => setFocused('username')}
+                      onBlur={() => setFocused(null)}
+                      cursorColor={C.ink}
+                      underlineColorAndroid="transparent"
+                      accessibilityLabel="Nome de usuário"
+                      style={styles.input}
+                      testID="create-username"
+                    />
+                  </View>
+                  {usernameError ? (
+                    <Txt size={13} weight={700} color={C.coral}>
+                      {usernameError}
+                    </Txt>
+                  ) : (
+                    <Txt size={12} color={C.muted}>
+                      3 a 24 caracteres (a-z, 0-9 e _). Você pode definir ou alterar depois.
+                    </Txt>
+                  )}
+                </View>
+
                 <View style={styles.navRow}>
-                  <PxButton onPress={() => goTo(1)} style={styles.backBtn} testID="step-back-2">
+                  <PxButton onPress={() => goTo(1)} style={styles.backBtn} disabled={submitting} testID="step-back-2">
                     <Icon name="back" size={16} />
                     <Txt>Voltar</Txt>
                   </PxButton>
                   <PxButton
                     variant="gold"
-                    onPress={start}
+                    onPress={() => void start()}
+                    disabled={submitting}
                     style={[styles.nextBtn, styles.primaryBtn]}
                     testID="create-start"
                   >
-                    <Arcade size={11}>COMEÇAR AVENTURA</Arcade>
+                    <Arcade size={11}>{submitting ? 'SALVANDO…' : 'COMEÇAR AVENTURA'}</Arcade>
                   </PxButton>
                 </View>
               </View>
@@ -312,6 +405,7 @@ const styles = StyleSheet.create({
   modeCard: { flex: 1, flexDirection: 'column', gap: 6, paddingTop: 14, paddingHorizontal: 8, paddingBottom: 16 },
   small: { opacity: 0.85 },
   field: { gap: 8 },
+  labelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   inputBox: { backgroundColor: C.cream },
   input: {
     height: 12 + 18 * 1.35 + 12,

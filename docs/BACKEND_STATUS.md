@@ -1,6 +1,6 @@
 # Estado do Backend e Integração — Desbrava
 
-**Última atualização:** 2026-11-21 (fechamento do marco **M2 — `supabase-sync-core`** na branch `react-native`)
+**Última atualização:** 2026-11-21 (fechamento do marco **M3 — `auth-migration-ui`** na branch `react-native`)
 
 Este documento acompanha o que já está implantado no Supabase, o que já existe no código do aplicativo Expo/React Native, o que foi adiado no escopo atual e como rodar/testar o projeto localmente ou no dispositivo.
 
@@ -74,8 +74,13 @@ Este documento acompanha o que já está implantado no Supabase, o que já exist
   - Motor de sincronização bidirecional: `src/services/syncCore.ts` (puro/testável no Node) e `src/services/sync.ts` (hooks no app): `syncProfile`, `syncActivity` (trilha `.bin.gz` via `activity-tracks` + Edge Function `verify-activity` + reconciliação autoritativa), `syncFog` (snapshot `DSBF` gzipado em `fog-snapshots` com `cacheControl: '0'`/`cacheNonce` + `upsert_fog_state` e retry com `fog.merge` em conflitos), `syncCitiesAndCaptures` (preservando `user_captures.is_verified = true`), `syncAchievements` (`claim_achievement`), `pushAllLocalToCloud`, `pullCloudToLocal` e auto-sync não-bloqueante ao hidratar, finalizar atividade ao vivo, importar GPX, editar perfil/configurações ou desbloquear conquistas.
   - Adaptações no estado e matemática do jogo: guarda polar em `src/game/geo.ts` (`|lat| <= 85.05112878`, `r <= 1024`), `fog.merge()` com remapeamento de `cityIds` em `src/game/fog.ts`, rastreio de `coinsByKind` e ações de reconciliação (`setSyncState`, `reconcileVerifiedActivity`, `applyCloudSnapshot`) em `src/game/store.ts` e `src/game/types.ts`, estado `fog:sync` e boot hook em `src/game/persist.ts` e auto-sync após importação GPX em `src/game/activitiesTransfer.ts`.
   - Verificação: `scripts/verify-sync-core.ts` (testes unitários + integração ao vivo contra `lugwebngeyadfrqoapsg`), `scripts/test-achievements.ts`, `npm run typecheck`, `npm run lint` e `npm run build:web` passando.
+- **Concluído — M3 (`auth-migration-ui`):**
+  - Autenticação e perfil (`src/services/authCore.ts`, `src/services/auth.ts`): `signInWithEmail`, `signUpWithEmail`, `sendPasswordReset`, `signOutAndReset`, `initAuthListener`, `updateProfileSettings`, validação/sugestão de `@username` (`^[a-z0-9_]{3,24}$`) e mensagens de erro mapeadas em pt-BR.
+  - Migração local ↔ nuvem (`src/services/migrationCore.ts`, `src/services/migration.ts`): inspeção de estado local vs nuvem (`profiles`, `activities`, `user_fog_state`), envio automático para conta nova, substituição automática para aparelho vazio e diálogo de conflito (`MigrationModal` com **Mesclar progresso** e **Manter apenas a nuvem**, com correção de persistência de `fog:v2` após `wipeAll()` em `src/game/persist.ts`).
+  - Deep links de convite (`src/services/deepLinkCore.ts`, `src/services/deepLink.ts`): captura `desbrava://add/<username>`, URLs web `/add/<username>` e `?add=<username>` em `pendingInviteUsername` via `App.tsx`, preservando `?skip`, `?sim=1`, `?debug` e `?gallery`.
+  - Telas e modais: `AuthModal.tsx`, `MigrationModal.tsx`, `Modals.tsx`, `TitleScreen.tsx` (Modo Convidado instantâneo + botão entrar/badge da conta), `CreateScreen.tsx` (`@username` opcional com sugestão automática) e `StatsScreen.tsx` (cartão **Conta e Sincronização** com `@username`, toggle `Perfil público`, sincronização manual e logout limpo).
+  - Verificação: `scripts/verify-auth-migration.ts`, `scripts/verify-sync-core.ts`, `scripts/test-achievements.ts`, `npm run typecheck`, `npm run lint`, `npm run build:web` e smoke check no Chrome headless contra `dist/`.
 - **Próximos marcos em andamento:**
-  - **M3 (`auth-migration-ui`):** Login/Cadastro por Email e Senha, Modo Convidado, persistência de sessão, criação/edição de `@username` e privacidade, migração local → nuvem (`TitleScreen`, `CreateScreen`, `StatsScreen`, `AuthModal`, `MigrationModal`) e deep links `desbrava://add/<username>`.
   - **M4 (`friends-ranking-ui`):** tela e fluxos de Amigos & Ranking (`SocialScreen.tsx`, `src/services/social.ts`, busca `search_users`, solicitações/bloqueio, resumo do amigo, Ranking de Amigos e Ranking Global).
   - **M5 (`store-cosmetics-ui`):** tela da Loja (`ShopScreen.tsx`, `src/services/storeService.ts`), compra atômica (`purchase_store_item`), inventário/cosméticos em pixel art (`src/sprites/*` + `map-runtime/*`) e ativação online de boosters (`user_boost_usages`).
 

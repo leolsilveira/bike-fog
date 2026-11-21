@@ -21,6 +21,8 @@ import { resolveAvatar, type AvatarConfig } from '../../sprites/avatar.ts';
 import { POI_INFO, RARITY_INFO } from '../../sprites/items.ts';
 import type { AchievementCategory, AchievementUnlockEvent, ActivitySummary, Capture } from '../../game/types.ts';
 import { AvatarCustomizer } from './AvatarCustomizer.tsx';
+import { AuthModal } from './AuthModal.tsx';
+import { MigrationModal } from './MigrationModal.tsx';
 import { BadgeImg, CharacterSprite, CoinImg, Icon } from './Sprites.tsx';
 import { Arcade, Bar, Chip, Muted, PxBox, PxButton, PxCell, Txt } from './Px.tsx';
 import { useOverlayTop } from './Hud.tsx';
@@ -137,6 +139,7 @@ function ModalCard({ children, testID }: { children: ReactNode; testID: string }
           style={styles.scroll}
           contentContainerStyle={styles.body}
           bounces={false}
+          keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
           {children}
@@ -661,6 +664,16 @@ export function ModalHost() {
         {modal.type === 'achievements' && <AchievementsModal onClose={close} />}
         {modal.type === 'summary' && <SummaryModal activity={modal.activity} onClose={close} />}
         {modal.type === 'avatar' && <AvatarEditorModal onClose={close} />}
+        {modal.type === 'auth' && (
+          <ModalCard testID="auth-modal">
+            <AuthModal onClose={close} />
+          </ModalCard>
+        )}
+        {modal.type === 'migration' && (
+          <ModalCard testID="migration-modal">
+            <MigrationModal onClose={close} />
+          </ModalCard>
+        )}
       </Backdrop>
     </PassiveCtx.Provider>
   );

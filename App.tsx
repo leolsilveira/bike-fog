@@ -8,6 +8,8 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useFonts } from 'expo-font';
 import { initGame } from './src/game/index.ts';
 import { useGame } from './src/game/store.ts';
+import { initAuthListener } from './src/services/auth.ts';
+import { initDeepLinks } from './src/services/deepLink.ts';
 // sem extensão: o Metro escolhe MapView.web.tsx na web
 import { MapView } from './src/map/MapView';
 import { TitleScreen } from './src/ui/screens/TitleScreen.tsx';
@@ -84,9 +86,15 @@ function Root() {
     initGame()
       .catch((err: unknown) => console.warn('[desbrava] falha ao iniciar o jogo', err))
       .finally(() => setInitDone(true));
+    const unsubAuth = initAuthListener();
+    const unsubLinks = initDeepLinks();
     // Rede de segurança: nunca prender o splash para sempre.
     const id = setTimeout(() => SplashScreen.hide(), 10000);
-    return () => clearTimeout(id);
+    return () => {
+      clearTimeout(id);
+      unsubAuth();
+      unsubLinks();
+    };
   }, []);
 
   const fontsReady = fontsLoaded || fontError != null;

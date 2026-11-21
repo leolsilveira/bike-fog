@@ -179,12 +179,12 @@ export function initOnlineSync(): () => void {
     }
   });
 
-  // Pull inicial silencioso ao abrir o app se já houver sessão autenticada e perfil local compatível
+  // Pull inicial silencioso ao abrir o app se já houver sessão autenticada e perfil vinculado à mesma conta
   void (async () => {
     const user = await getSupabaseUser();
     const s = useGame.getState();
     const localCloudId = s.cloudUserId ?? s.profile?.cloudUserId;
-    if (user && s.profile && (!localCloudId || localCloudId === user.id)) {
+    if (user && s.profile && localCloudId === user.id) {
       await pullCloudToLocal({ mode: 'merge' });
     }
   })().catch((err) => console.warn('[sync] pull inicial falhou', err));

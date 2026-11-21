@@ -2,14 +2,14 @@
 // Port de legacy/src/ui/screens/TitleScreen.tsx + seção .title-screen de global.css.
 import { useEffect, useState } from 'react';
 import {
-  Animated, Easing, Platform, Pressable, StyleSheet, useWindowDimensions, View, type DimensionValue,
-  type ViewStyle,
+  Animated, Easing, Platform, StyleSheet, useWindowDimensions, View, type DimensionValue, type ViewStyle,
 } from 'react-native';
 import { GAME_NAME, GAME_TAGLINE } from '../../game/config.ts';
 import { sfx, unlockAudio } from '../../game/audio.ts';
 import { useGame } from '../../game/store.ts';
+import { isSupabaseConfigured } from '../../services/supabase.ts';
 import { CharacterSprite } from '../components/Sprites.tsx';
-import { Arcade, PxButton, Txt } from '../components/Px.tsx';
+import { Arcade, Chip, PxButton, Txt } from '../components/Px.tsx';
 import { SkyBackdrop } from '../components/Backdrops.tsx';
 import { C, FILL, useSafe } from '../theme.ts';
 
@@ -43,22 +43,27 @@ const LOGO_LAYERS: { x: number; y: number; color: string; opacity?: number }[] =
 
 export function TitleScreen({ onStart }: { onStart: () => void }) {
   const profile = useGame((s) => s.profile);
+  const authEmail = useGame((s) => s.authEmail);
+  const pushModal = useGame((s) => s.pushModal);
   const { width } = useWindowDimensions();
   const { safeT, safeB } = useSafe();
+  const supabaseReady = isSupabaseConfigured();
   // O toque também libera o áudio do navegador (no celular é no-op).
   const start = () => {
     unlockAudio();
     sfx.start();
     onStart();
   };
+  const openAuth = () => {
+    unlockAudio();
+    sfx.click();
+    pushModal({ type: 'auth' });
+  };
   // Conteúdo centralizado: a mesma folga nos dois lados mantém o centro do original e foge do entalhe.
   const padV = 24 + Math.max(safeT, safeB);
   return (
-    <Pressable
+    <View
       style={[styles.screen, { paddingTop: padV, paddingBottom: padV }]}
-      onPress={start}
-      accessibilityRole="button"
-      accessibilityLabel={profile ? 'Continuar' : 'Começar'}
       testID="title-screen"
     >
       <SkyBackdrop />
@@ -79,11 +84,22 @@ export function TitleScreen({ onStart }: { onStart: () => void }) {
         <CharacterSprite characterId="teo" modality="run" facing="right" width={96} />
       </View>
       <PressStart label={profile ? 'CONTINUAR' : 'COMEÇAR'} onPress={start} />
+      {supabaseReady && (
+        authEmail ? (
+          <Chip dot={C.mint} testID="auth-status-email">
+            {authEmail}
+          </Chip>
+        ) : (
+          <PxButton size="small" variant="sky" onPress={openAuth} testID="auth-open-btn">
+            Entrar / Criar conta
+          </PxButton>
+        )
+      )}
       <Txt size={13} weight={600} color={C.ink} align="center" style={styles.foot}>
         Um jogo de exploração para ciclistas e corredores. Revele a névoa da sua cidade, capture pontos turísticos e colete
         moedas a cada pedalada.
       </Txt>
-    </Pressable>
+    </View>
   );
 }
 

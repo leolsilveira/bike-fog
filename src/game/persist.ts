@@ -131,8 +131,8 @@ export function startAutosave(onBackground?: () => void): void {
       scheduleSave();
     }
   });
-  fog.subscribe((_added, reset) => {
-    if (!reset) cellsDirty = true;
+  fog.subscribe((added, reset) => {
+    if (!reset || (hydrated && added.length > 0)) cellsDirty = true;
     scheduleSave();
   });
   // No celular o app pode ser morto a qualquer momento depois de sair da tela: salva na saída.

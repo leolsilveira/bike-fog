@@ -6,8 +6,8 @@ import { levelFromXp } from './progression.ts';
 import { XP } from './config.ts';
 import type {
   AchievementRecord, AchievementUnlockEvent, ActivitySummary, AvatarConfig, Capture, City, Coin, CoinsByKind,
-  GpsStatus, LiveActivity, Modal, Modality, PlannedRoute, PlayerFix, Poi, Profile, RouteProgress, Settings, Tab, Toast,
-  Totals,
+  GpsStatus, LiveActivity, Modal, Modality, PendingMigration, PlannedRoute, PlayerFix, Poi, Profile, RouteProgress,
+  Settings, Tab, Toast, Totals,
 } from './types.ts';
 
 export interface PersistedState {
@@ -77,10 +77,22 @@ interface RuntimeState {
   syncing: boolean;
   lastSyncError: string | null;
   lastSyncedAt: number | null;
+  /** Estado de autenticação, convite por deep link e conflito de migração (não persistido em save:v1). */
+  authUserId: string | null;
+  authEmail: string | null;
+  authLoading: boolean;
+  pendingInviteUsername: string | null;
+  pendingMigration: PendingMigration | null;
 }
 
 interface Actions {
-  createProfile(name: string, avatar: AvatarConfig, modality: Modality, characterId?: string): void;
+  createProfile(
+    name: string,
+    avatar: AvatarConfig,
+    modality: Modality,
+    characterId?: string,
+    opts?: { username?: string; isPublic?: boolean },
+  ): void;
   setModality(m: Modality): void;
   setAvatar(avatar: AvatarConfig, characterId?: string): void;
   setCharacter(id: string): void;
@@ -104,6 +116,10 @@ interface Actions {
   capturePoi(poi: Poi, cityId: string | null): Capture | null;
   grantAchievements(unlocks: AchievementUnlockEvent[], opts?: { batchToast?: boolean }): number;
   setSyncState(patch: Partial<{ syncing: boolean; lastSyncError: string | null; lastSyncedAt: number | null }>): void;
+  setAuthState(patch: Partial<{ authUserId: string | null; authEmail: string | null; authLoading: boolean }>): void;
+  setPendingInviteUsername(username: string | null): void;
+  setPendingMigration(migration: PendingMigration | null): void;
+  updateProfileIdentity(patch: Partial<Pick<Profile, 'name' | 'username' | 'isPublic'>>): void;
   reconcileVerifiedActivity(payload: VerifiedActivityReconciliation): void;
   applyCloudSnapshot(snapshot: Partial<PersistedState>): void;
   resetProgress(): void;
@@ -166,10 +182,23 @@ export const useGame = create<GameState>()((set, get) => ({
   syncing: false,
   lastSyncError: null,
   lastSyncedAt: null,
+  authUserId: null,
+  authEmail: null,
+  authLoading: false,
+  pendingInviteUsername: null,
+  pendingMigration: null,
 
-  createProfile(name, avatar, modality, characterId = 'custom') {
+  createProfile(name, avatar, modality, characterId = 'custom', opts) {
     set({
-      profile: { name: name.trim() || 'Viajante', characterId, avatar, modality, createdAt: Date.now() },
+      profile: {
+        name: name.trim() || 'Viajante',
+        characterId,
+        avatar,
+        modality,
+        createdAt: Date.now(),
+        ...(opts?.username ? { username: opts.username } : {}),
+        ...(opts?.isPublic !== undefined ? { isPublic: opts.isPublic } : {}),
+      },
       tab: 'map',
     });
   },
@@ -381,6 +410,20 @@ export const useGame = create<GameState>()((set, get) => ({
   setSyncState(patch) {
     set(patch);
   },
+  setAuthState(patch) {
+    set(patch);
+  },
+  setPendingInviteUsername(username) {
+    set({ pendingInviteUsername: username });
+  },
+  setPendingMigration(migration) {
+    set({ pendingMigration: migration });
+  },
+  updateProfileIdentity(patch) {
+    const p = get().profile;
+    if (!p) return;
+    set({ profile: { ...p, ...patch } });
+  },
   reconcileVerifiedActivity(payload) {
     const s = get();
     const now = Date.now();
@@ -439,6 +482,7 @@ export const useGame = create<GameState>()((set, get) => ({
       syncing: false,
       lastSyncError: null,
       lastSyncedAt: null,
+      pendingMigration: null,
       tab: 'map',
       modals: [],
       toasts: [],
