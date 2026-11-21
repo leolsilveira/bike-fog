@@ -18,6 +18,7 @@
   "exclude": [
     "map-runtime",
     "scripts",
+    "supabase",
     "node_modules"
   ]
 }

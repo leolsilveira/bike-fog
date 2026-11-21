@@ -1,0 +1,122 @@
+# Estado do Backend e Integração — Desbrava
+
+**Última atualização:** 2026-11-21 (fechamento do marco **M1 — `design-backend`** na branch `react-native`)
+
+Este documento acompanha o que já está implantado no Supabase, o que já existe no código do aplicativo Expo/React Native, o que foi adiado no escopo atual e como rodar/testar o projeto localmente ou no dispositivo.
+
+---
+
+## 1. O que está implantado no Supabase (`lugwebngeyadfrqoapsg`)
+
+- **Projeto:** `lugwebngeyadfrqoapsg` (região `eu-west-1`, PostgreSQL 17.12)
+- **URL:** `https://lugwebngeyadfrqoapsg.supabase.co`
+- **Migrações aplicadas (`0001`–`0009` em `supabase/migrations/`):**
+  - `0001_extensions_and_core_tables` — extensão `pg_trgm` no schema `extensions`, schema `private` e 11 tabelas em `public` com índices.
+  - `0002_auth_trigger_and_rls` — trigger `on_auth_user_created` (`private.handle_new_user`), triggers de proteção e RLS nas 11 tabelas.
+  - `0003_storage_buckets` — buckets privados e políticas em `storage.objects`.
+  - `0004_rpcs` — funções RPC iniciais.
+  - `0005_seed_store_items` — catálogo inicial da loja (`store_items`).
+  - `0006_service_role_private_grants` — permissões do schema `private` para `service_role`.
+  - `0007_security_hardening_and_index_fix` — endurecimento pós-auditoria (`commit_verified_activity_v2`, proteção de `user_captures.is_verified`, índices globais por métrica).
+  - `0008_protect_verified_captures_and_city_pct` — bloqueio de `UPDATE` em capturas verificadas, cálculo autoritativo de `city_pct` e checagem `IS DISTINCT FROM` em `upsert_fog_state`.
+  - `0009_reject_nan_and_revoke_table_privs` — constraint `user_cities_area_finite` contra `NaN`/`Infinity`, guarda finita em `claim_achievement` e revogação de privilégios residuais (`TRUNCATE`, `REFERENCES`, `TRIGGER`, `MAINTAIN`) nas 11 tabelas.
+
+### Tabelas (`public`, todas com RLS habilitada) e proteção de colunas
+
+| Tabela | Proteção principal |
+|---|---|
+| `profiles` | `SELECT` restrito ao próprio dono (`auth.uid() = id`); `REVOKE/GRANT` por coluna + trigger `private.protect_profile_columns` bloqueiam escrita direta do cliente em `xp`, `level`, `wallet`, `total_*` e `achievements_count`. |
+| `activities` | Escrita direta pelo cliente bloqueada; gravada exclusivamente via `commit_verified_activity_v2` (`service_role`). |
+| `user_cities` | `SELECT`/`INSERT`/`UPDATE` apenas do próprio usuário; `area_m2` e `cell_area_m2` finitos e não negativos; conquistas exigem atividade verificada. |
+| `user_captures` | `GRANT` por coluna exclui `is_verified`; trigger `private.protect_user_captures_columns` força `is_verified = false` no cliente e bloqueia `UPDATE` em capturas já verificadas (`42501`). |
+| `user_achievements` | Escrita direta pelo cliente bloqueada; desbloqueio exclusivo pela RPC `claim_achievement`. |
+| `user_fog_state` | Escrita direta pelo cliente bloqueada; atualização exclusiva pela RPC `upsert_fog_state`. |
+| `friendships` | `SELECT`/`INSERT`/`UPDATE`/`DELETE` restritos às partes, com máquina de estados e proteção de bloqueio via `private.protect_friendships_transitions` (`blocked_by`). |
+| `store_items` | Somente leitura para `anon` e `authenticated`. |
+| `user_inventory` | Escrita direta pelo cliente bloqueada; gerenciada por `purchase_store_item` e `commit_verified_activity_v2`. |
+| `user_boost_usages` | `SELECT` e `INSERT` do próprio usuário apenas com `consumed_at IS NULL`; consumo atômico no servidor. |
+| `wallet_ledger` | Extrato append-only (`UNIQUE (user_id, reason, ref_id)`); escrita exclusiva do servidor. |
+
+### Storage Buckets Privados
+
+- `fog-snapshots` (`public = false`, limite `10 MiB`, caminho `{user_id}/fog.bin.gz`)
+- `activity-tracks` (`public = false`, limite `5 MiB`, caminho `{user_id}/{activity_id}.bin.gz`)
+- Políticas em `storage.objects` restringem `SELECT`, `INSERT`, `UPDATE` e `DELETE` a `authenticated` na pasta do próprio `auth.uid()`.
+
+### Funções RPC (`public`)
+
+- `search_users(p_query, p_limit)` — busca pública por `@username` / nome (`pg_trgm`) excluindo bloqueios.
+- `get_public_profile(p_user_id)` e `get_public_profile_by_username(p_username)` — resumo público/de amigo sem expor `wallet`, `settings`, `activities` ou trilhas.
+- `get_friends_leaderboard(p_metric, p_period)` — ranking entre amigos aceitos (`xp` | `distance` | `cells`, `all_time` | `monthly` em `America/Sao_Paulo`).
+- `get_global_leaderboard(p_metric, p_period, p_limit, p_offset)` — ranking global (`is_public = true` no `all_time` e atividades `verified` + `live` no `monthly`) com `{ entries, my_rank }`.
+- `purchase_store_item(p_item_id, p_quantity)` — compra atômica com lock `FOR UPDATE` em `profiles` e `user_inventory`, débito em `wallet` e lançamento em `wallet_ledger`.
+- `claim_achievement(p_achievement_key)` — validação autoritativa em chave canônica contra atividades/capturas/cidades verificadas e crédito idempotente em `wallet`.
+- `upsert_fog_state(p_storage_path, p_cell_count, p_expected_revision)` — controle otimista de `revision` e teto de células verificadas.
+- `commit_verified_activity_v2(...)` — restrita a `service_role`, grava atividade, promove capturas verificadas, consome boosters (`user_boost_usages` + `user_inventory`), lança moedas no `wallet_ledger` e recalcula totais/nível no perfil. *(A assinatura legada `commit_verified_activity` v1 foi revogada inclusive de `service_role`.)*
+
+### Edge Function e Seed da Loja
+
+- **Edge Function `verify-activity`** (`status: ACTIVE`, versão `3`, `verify_jwt = false` com validação interna via `auth.getUser(token)`): lê a trilha `.bin.gz` no bucket `activity-tracks`, valida assinatura gzip/formato, aplica paridade matemática e regras anti-cheat em `supabase/functions/verify-activity/{index.ts, validator.ts, gameMath.ts}` e chama `commit_verified_activity_v2`.
+- **Seed `store_items`** (`0005_seed_store_items.sql`): **19 itens** ativos em pt-BR — 16 cosméticos permanentes (`character`: Kenji, Maya, Zeca; `hat`: Boné Retrô, Gorro Urbano, Coroa do Desbravador; `glasses`: Óculos Aviador, Viseira Neon; `bike`: Quadro Carbono, Bike Dourada; `shoe`: Tênis Turbo Coral, Tênis Relâmpago; `pet`: Doguinho Caramelo, Gatinho da Névoa; `color`: Paleta Cyber Neon, Paleta Aurora Real) e 3 boosters consumíveis (`boost_xp_2x`, `boost_fog_wide`, `boost_coins_2x`, empilháveis até 10 unidades).
+
+---
+
+## 2. O que já está implementado no app
+
+- **Concluído — M1 (`design-backend`):**
+  - Especificação completa em `docs/design/003-supabase-backend.md` e ADR em `docs/decisions/003-supabase-backend-and-offline-sync.md`.
+  - Migrações `0001`–`0009` e Edge Function `verify-activity` versionadas em `supabase/` e implantadas no projeto `lugwebngeyadfrqoapsg`.
+  - Dependências Expo SDK 57 instaladas em `package.json`: `@supabase/supabase-js`, `expo-secure-store`, `expo-crypto` e `expo-linking` (com plugin `expo-secure-store` configurado em `app.json`).
+  - Template de variáveis de ambiente em `.env.example` e script de verificação de backend em `scripts/verify-supabase-backend.ts`.
+- **Próximos marcos em andamento:**
+  - **M2 (`supabase-sync-core`):** cliente Supabase (`src/services/supabase.ts`), armazenamento seguro de sessão (`src/services/sessionStorage*`), guarda polar em `src/game/geo.ts` e sincronização bidirecional completa (`src/services/sync.ts`: perfil, XP/nível, carteira, totais, atividades + trilhas via `verify-activity`, névoa `fog:v2` + `fog-snapshots`, cidades, capturas e conquistas).
+  - **M3 (`auth-migration-ui`):** Login/Cadastro por Email e Senha, Modo Convidado, persistência de sessão, criação/edição de `@username` e privacidade, migração local → nuvem (`TitleScreen`, `CreateScreen`, `StatsScreen`, `AuthModal`, `MigrationModal`) e deep links `desbrava://add/<username>`.
+  - **M4 (`friends-ranking-ui`):** tela e fluxos de Amigos & Ranking (`SocialScreen.tsx`, `src/services/social.ts`, busca `search_users`, solicitações/bloqueio, resumo do amigo, Ranking de Amigos e Ranking Global).
+  - **M5 (`store-cosmetics-ui`):** tela da Loja (`ShopScreen.tsx`, `src/services/storeService.ts`), compra atômica (`purchase_store_item`), inventário/cosméticos em pixel art (`src/sprites/*` + `map-runtime/*`) e ativação online de boosters (`user_boost_usages`).
+
+---
+
+## 3. O que foi adiado (Deferred)
+
+Para priorizar o app funcionando de ponta a ponta com integração online direta no Supabase, os itens abaixo foram explicitamente **adiados (fora do escopo atual)**:
+
+- Iterações adicionais de auditoria profunda de segurança e loops extras de hardening no backend.
+- Expansão e execução de suítes pesadas de testes E2E (`tier1`–`tier4`).
+- Fila offline durável (`sync:outbox`) e caches locais de leitura (`cache:friends`, `cache:leaderboard`, `cache:store`, `cache:inventory`).
+- Ativação e reconciliação offline de boosters (os boosters serão ativados online via `user_boost_usages`).
+- Provedores OAuth **Sign in with Apple** e **Google Sign-In**.
+
+---
+
+## 4. Como rodar e testar localmente / no dispositivo
+
+1. **Configurar variáveis de ambiente (nunca commitar `.env.local`):**
+   ```bash
+   cp .env.example .env.local
+   ```
+   Preencha `.env.local` com os valores do projeto `lugwebngeyadfrqoapsg`:
+   - `EXPO_PUBLIC_SUPABASE_URL=https://lugwebngeyadfrqoapsg.supabase.co`
+   - `EXPO_PUBLIC_SUPABASE_ANON_KEY=<sua-chave-publicavel-ou-anon>`
+
+2. **Instalar dependências (também gera o mapa embutido via `postinstall`):**
+   ```bash
+   npm install
+   ```
+
+3. **Rodar verificações estáticas (obrigatório antes de fechar qualquer entrega):**
+   ```bash
+   npm run typecheck
+   npm run lint
+   ```
+
+4. **Rodar no dispositivo ou navegador:**
+   ```bash
+   npx expo start
+   ```
+   - Escaneie o QR Code com o Expo Go / Development Build no iOS ou Android, ou pressione `w` (ou rode `npm run web`) para abrir na Web.
+   - Se adicionar módulos nativos fora do bundle do Expo Go, gere um Development Build com `npx expo run:ios` / `npx expo run:android` ou `npx eas-cli@latest build --profile development`.
+
+5. **Gerar build estático para Web:**
+   ```bash
+   npm run build:web
+   ```
