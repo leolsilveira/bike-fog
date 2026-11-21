@@ -1,6 +1,21 @@
 # Estado do Backend e Integração — Desbrava
 
-**Última atualização:** 2026-11-21 (fechamento do marco **M5 — `store-cosmetics-ui`** na branch `react-native`)
+**Última atualização:** 2026-11-21 (verificação final do POC ponta a ponta — M1 a M5 concluídos na branch `react-native`)
+
+> [!NOTE]
+> **Estado atual: POC funcional de ponta a ponta.** Login/cadastro por email e senha (ou Modo Convidado), sincronização de perfil, XP, moedas, atividades, névoa, cidades, capturas e conquistas com o Supabase, aba **Social** (amigos + rankings) e aba **Loja** (cosméticos + boosters).
+>
+> **Verificação final (2026-11-21):** `npm run typecheck` ✅ · `npm run lint` ✅ · `npm run build:web` ✅ · `scripts/verify-store.ts` ao vivo 4/4 ✅ · smoke check no Chrome headless (tela inicial com "Entrar / Criar conta", sem erros de runtime) ✅
+>
+> **Para testar no celular:** `expo-secure-store` e `expo-crypto` são módulos nativos novos — gere um novo Development Build (`npx expo run:ios` ou `npx eas-cli@latest build --profile development`) antes de abrir o app; o build antigo não traz esses módulos.
+
+| Marco | Commit | Conteúdo |
+|---|---|---|
+| M1 `design-backend` | `7b228e8` | Schema, RLS, RPCs, buckets, Edge Function `verify-activity`, design doc |
+| M2 `supabase-sync-core` | `1cb7523`, `fa0d157` | Cliente Supabase, sessão segura, sincronização bidirecional |
+| M3 `auth-migration-ui` | `2fe8031` | Login/cadastro email+senha, Convidado, migração local↔nuvem, deep links, logout |
+| M4 `friends-ranking-ui` | `8714e13` | Busca e pedidos de amizade, perfil público, rankings de amigos e global |
+| M5 `store-cosmetics-ui` | `ddb9569` | Loja, compra atômica, cosméticos no avatar/mapa, boosters |
 
 Este documento acompanha o que já está implantado no Supabase, o que já existe no código do aplicativo Expo/React Native, o que foi adiado no escopo atual e como rodar/testar o projeto localmente ou no dispositivo.
 
