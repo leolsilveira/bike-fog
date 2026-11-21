@@ -52,7 +52,7 @@ export function angleDiff(from: number, to: number): number {
 
 export function toMerc(p: LngLat): { x: number; y: number } {
   const x = (p.lng + 180) / 360;
-  const s = Math.sin(p.lat * RAD);
+  const s = Math.max(-0.99999999, Math.min(0.99999999, Math.sin(p.lat * RAD)));
   const y = 0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI);
   return { x, y };
 }
@@ -106,9 +106,18 @@ export function cellSizeM(lat: number): number {
 
 /** Todas as células cujo centro está a até `radius` metros de `p`. */
 export function cellsInRadius(p: LngLat, radius: number): number[] {
-  const m = toMerc(p);
   const size = cellSizeM(p.lat);
-  const r = Math.ceil(radius / size);
+  if (
+    Math.abs(p.lat) > 85.05112878 ||
+    !(size >= 0.01) ||
+    !Number.isFinite(size) ||
+    !(radius >= 0) ||
+    !Number.isFinite(radius)
+  ) {
+    return [];
+  }
+  const m = toMerc(p);
+  const r = Math.min(1024, Math.ceil(radius / size));
   const cx0 = Math.floor(m.x * CELLS_PER_AXIS);
   const cy0 = Math.floor(m.y * CELLS_PER_AXIS);
   const fx = m.x * CELLS_PER_AXIS;

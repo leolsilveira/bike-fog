@@ -1,14 +1,21 @@
+import type { AvatarConfig } from '../sprites/avatar.ts';
 import type { Modality } from '../sprites/characters.ts';
+import type { IconName } from '../sprites/icons.ts';
 import type { CoinKind, PoiCategory, Rarity } from '../sprites/items.ts';
 import type { BBox, LngLat } from './geo.ts';
 
-export type { Modality, CoinKind, PoiCategory, Rarity, LngLat };
+export type { AvatarConfig, Modality, CoinKind, PoiCategory, Rarity, LngLat };
 
 export interface Profile {
   name: string;
   characterId: string;
+  avatar?: AvatarConfig;
   modality: Modality;
   createdAt: number;
+  username?: string;
+  isPublic?: boolean;
+  cloudUserId?: string;
+  cloudSyncedAt?: number;
 }
 
 export interface Coin {
@@ -47,6 +54,16 @@ export interface City {
   discoveredAt: number;
 }
 
+export type ActivitySource = 'live' | 'gpx_import';
+export type VerificationStatus = 'local' | 'pending' | 'verified' | 'flagged';
+
+export interface CoinsByKind {
+  bronze: number;
+  silver: number;
+  gold: number;
+  gem: number;
+}
+
 export interface ActivitySummary {
   id: string;
   modality: Modality;
@@ -64,6 +81,11 @@ export interface ActivitySummary {
   newCells: number;
   xp: number;
   cityIds: string[];
+  source?: ActivitySource;
+  verificationStatus?: VerificationStatus;
+  verificationReason?: string | null;
+  coinsByKind?: CoinsByKind;
+  boostUsageIds?: string[];
 }
 
 export interface LiveActivity extends Omit<ActivitySummary, 'endedAt'> {
@@ -90,7 +112,59 @@ export interface Settings {
   simulator: boolean;
 }
 
-export type Tab = 'map' | 'record' | 'stats';
+/** Lugar encontrado na busca de endereços (Photon). */
+export interface Place {
+  /** Linha principal: nome do lugar ou "rua, número". */
+  name: string;
+  /** Linha de baixo: rua, bairro e cidade (o que houver). */
+  detail: string;
+  lng: number;
+  lat: number;
+}
+
+/**
+ * Rota planejada na folha "Nova atividade": até um endereço (só ida ou ida e volta) ou uma volta automática
+ * com a distância pedida, que sai e chega no mesmo ponto.
+ */
+export interface PlannedRoute {
+  kind: 'address' | 'loop';
+  /** Destino; na volta automática, o próprio ponto de partida (com o nome "Volta de X km"). */
+  dest: Place;
+  roundTrip: boolean;
+  /** Perfil usado no traçado (bike → ciclovias/ruas; corrida → perfil a pé). */
+  modality: Modality;
+  /** Trajeto em pares lng,lat achatados. */
+  coords: number[];
+  distanceM: number;
+  /** Paradas que ainda faltam (já ajustadas às ruas): pontos intermediários, destino e, se for o caso, a volta. */
+  stops: LngLat[];
+  /** Fração do trajeto (0 a 1) que passa por onde ainda há névoa. */
+  fogShare: number;
+}
+
+/** Andamento na rota durante a atividade. */
+export interface RouteProgress {
+  doneM: number;
+  remainingM: number;
+  /** Distância até o trajeto (m). */
+  offRouteM: number;
+  arrived: boolean;
+}
+
+/** Abas da barra. Gravar não é aba: o botão do meio abre a folha "Nova atividade" (ver store `planning`). */
+export type Tab = 'map' | 'social' | 'shop' | 'stats';
+
+export type BoosterCategory = 'boost_xp' | 'boost_fog' | 'boost_coins';
+
+export interface ActiveBooster {
+  usageId: string;
+  itemId: string;
+  category: BoosterCategory;
+  multiplier: number;
+  name: string;
+  activatedAt: number;
+  expiresAt: number;
+}
 
 export interface PlayerFix extends LngLat {
   accuracy: number;
@@ -101,15 +175,61 @@ export interface PlayerFix extends LngLat {
 
 export type GpsStatus = 'off' | 'searching' | 'ok' | 'weak' | 'denied' | 'unavailable' | 'sim';
 
+export type AchievementCategory =
+  | 'exploration'
+  | 'cities'
+  | 'distance'
+  | 'collection'
+  | 'consistency'
+  | 'special';
+
+export interface AchievementRecord {
+  /** Momento em que foi desbloqueada (ms). */
+  at: number;
+  /** Moedas concedidas no desbloqueio. */
+  coins: number;
+}
+
+export interface AchievementUnlockEvent {
+  key: string;
+  title: string;
+  subtitle: string;
+  coins: number;
+  category: AchievementCategory;
+  icon: IconName;
+  tier?: number;
+  maxTier?: number;
+}
+
 export interface Toast {
   id: number;
   text: string;
-  kind: 'coin' | 'info' | 'warn' | 'city' | 'xp';
+  kind: 'coin' | 'info' | 'warn' | 'city' | 'xp' | 'achievement';
   coinKind?: CoinKind;
+}
+
+export interface MigrationSummary {
+  activities: number;
+  cells: number;
+  captures: number;
+  xp: number;
+  displayName?: string;
+}
+
+export interface PendingMigration {
+  userId: string;
+  email: string | null;
+  local: MigrationSummary;
+  cloud: MigrationSummary;
 }
 
 export type Modal =
   | { type: 'capture'; capture: Capture; xp: number }
   | { type: 'levelup'; level: number; title: string }
+  | { type: 'achievement'; unlock: AchievementUnlockEvent }
+  | { type: 'achievements' }
   | { type: 'summary'; activity: ActivitySummary }
-  | { type: 'characters' };
+  | { type: 'avatar' }
+  | { type: 'auth' }
+  | { type: 'migration' }
+  | { type: 'friend_profile'; userId: string; friendshipId?: string };

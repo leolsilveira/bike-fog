@@ -27,16 +27,26 @@ function chunk(type: string, data: Uint8Array): Buffer {
   return Buffer.concat([len, typeBuf, Buffer.from(data), crc]);
 }
 
-export function encodePng(r: Raster): Buffer {
+/**
+ * PNG 8-bit de um raster. `alpha: false` grava RGB sem canal alfa (o ícone da App Store não pode ter
+ * transparência); nesse caso o raster precisa ser todo opaco.
+ */
+export function encodePng(r: Raster, { alpha = true }: { alpha?: boolean } = {}): Buffer {
+  const ch = alpha ? 4 : 3;
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(r.w, 0);
   ihdr.writeUInt32BE(r.h, 4);
   ihdr[8] = 8; // bit depth
-  ihdr[9] = 6; // RGBA
-  const raw = Buffer.alloc((r.w * 4 + 1) * r.h);
+  ihdr[9] = alpha ? 6 : 2; // RGBA : RGB
+  const stride = r.w * ch + 1;
+  const raw = Buffer.alloc(stride * r.h);
   for (let y = 0; y < r.h; y++) {
-    raw[y * (r.w * 4 + 1)] = 0;
-    Buffer.from(r.data.buffer, r.data.byteOffset + y * r.w * 4, r.w * 4).copy(raw, y * (r.w * 4 + 1) + 1);
+    raw[y * stride] = 0;
+    for (let x = 0; x < r.w; x++) {
+      const si = (y * r.w + x) * 4;
+      if (!alpha && r.data[si + 3] !== 255) throw new Error(`encodePng: pixel transparente em (${x}, ${y})`);
+      for (let k = 0; k < ch; k++) raw[y * stride + 1 + x * ch + k] = r.data[si + k];
+    }
   }
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),

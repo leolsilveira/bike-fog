@@ -1,6 +1,5 @@
 // Texturas 16x16 que repetem (fill-pattern do mapa) e decorações (árvores billboard).
-import type { Art, Palette } from './pixel.ts';
-import { rasterize, type Raster } from './pixel.ts';
+import { rasterize, type Art, type Palette, type Raster } from './pixel.ts';
 
 export const MAP_COLORS = {
   grass: '#b7e08e',

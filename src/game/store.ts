@@ -3,9 +3,11 @@ import { create } from 'zustand';
 import { CHARACTERS } from '../sprites/characters.ts';
 import { COIN_VALUE, RARITY_INFO } from '../sprites/items.ts';
 import { levelFromXp } from './progression.ts';
+import { REVEAL_RADIUS_M, XP } from './config.ts';
 import type {
-  ActivitySummary, Capture, City, Coin, GpsStatus, LiveActivity, Modal, Modality, PlayerFix, Poi, Profile,
-  Settings, Tab, Toast, Totals,
+  AchievementRecord, AchievementUnlockEvent, ActiveBooster, ActivitySummary, AvatarConfig, BoosterCategory,
+  Capture, City, Coin, CoinsByKind, GpsStatus, LiveActivity, Modal, Modality, PendingMigration, PlannedRoute,
+  PlayerFix, Poi, Profile, RouteProgress, Settings, Tab, Toast, Totals,
 } from './types.ts';
 
 export interface PersistedState {
@@ -18,9 +20,37 @@ export interface PersistedState {
   captures: Record<string, Capture>;
   cities: Record<string, City>;
   activities: ActivitySummary[];
+  achievements: Record<string, AchievementRecord>;
   settings: Settings;
   coins: Coin[];
   live: LiveActivity | null;
+  /** Rota planejada (salva junto: sobrevive ao app fechar no meio da atividade). */
+  route: PlannedRoute | null;
+  cloudUserId?: string;
+  cloudSyncedAt?: number;
+}
+
+export interface VerifiedActivityReconciliation {
+  activityId: string;
+  verificationStatus: 'verified' | 'flagged';
+  verificationReason?: string | null;
+  distanceM?: number;
+  movingS?: number;
+  maxSpeed?: number;
+  xpEarned?: number;
+  coinsEarned?: number;
+  newCells?: number;
+  authoritative: {
+    xp: number;
+    level: number;
+    wallet: number;
+    totalDistanceM: number;
+    totalMovingS: number;
+    totalActivities: number;
+    totalCells: number;
+    totalCaptures: number;
+    achievementsCount: number;
+  };
 }
 
 interface RuntimeState {
@@ -33,18 +63,48 @@ interface RuntimeState {
   speedWarning: boolean;
   /** Muda quando o registro de POIs muda (para listas "por perto"). */
   poiRev: number;
+  /** Muda após ações sociais (convites, amizades, bloqueios) para atualizar listas e rankings. */
+  socialRev: number;
   /** Cidade em que o jogador está agora. */
   currentCityId: string | null;
   /** POI tocado no mapa (cartão de detalhes). */
   selected: Poi | null;
+  /** Folha "Nova atividade" aberta (modalidade, rota e INICIAR). */
+  planning: boolean;
+  /** Andamento na rota planejada durante a atividade (ver game/route.ts). */
+  routeProgress: RouteProgress | null;
+  /** Recálculo automático da rota (fora do trajeto): em andamento ou falhou na última tentativa. */
+  rerouting: 'idle' | 'busy' | 'failed';
+  /** Estado de sincronização online com o Supabase (não persistido em save:v1). */
+  syncing: boolean;
+  lastSyncError: string | null;
+  lastSyncedAt: number | null;
+  /** Estado de autenticação, convite por deep link e conflito de migração (não persistido em save:v1). */
+  authUserId: string | null;
+  authEmail: string | null;
+  authLoading: boolean;
+  pendingInviteUsername: string | null;
+  pendingMigration: PendingMigration | null;
+  /** Boosters online ativos na sessão atual (não persistido em save:v1). */
+  activeBoosters: ActiveBooster[];
 }
 
 interface Actions {
-  createProfile(name: string, characterId: string, modality: Modality): void;
+  createProfile(
+    name: string,
+    avatar: AvatarConfig,
+    modality: Modality,
+    characterId?: string,
+    opts?: { username?: string; isPublic?: boolean },
+  ): void;
   setModality(m: Modality): void;
+  setAvatar(avatar: AvatarConfig, characterId?: string): void;
   setCharacter(id: string): void;
   unlockCharacter(id: string): boolean;
   setTab(t: Tab): void;
+  /** Abre/fecha a folha "Nova atividade" (abrir leva para a aba Mapa). */
+  setPlanning(open: boolean): void;
+  setRoute(route: PlannedRoute | null): void;
   setSetting<K extends keyof Settings>(k: K, v: Settings[K]): void;
   toast(text: string, kind?: Toast['kind'], coinKind?: Toast['coinKind']): void;
   dismissToast(id: number): void;
@@ -58,11 +118,28 @@ interface Actions {
   discardActivity(): void;
   collectCoin(coin: Coin): void;
   capturePoi(poi: Poi, cityId: string | null): Capture | null;
+  grantAchievements(unlocks: AchievementUnlockEvent[], opts?: { batchToast?: boolean }): number;
+  setSyncState(patch: Partial<{ syncing: boolean; lastSyncError: string | null; lastSyncedAt: number | null }>): void;
+  setAuthState(patch: Partial<{ authUserId: string | null; authEmail: string | null; authLoading: boolean }>): void;
+  setPendingInviteUsername(username: string | null): void;
+  setPendingMigration(migration: PendingMigration | null): void;
+  bumpSocialRev(): void;
+  setWallet(wallet: number): void;
+  grantUnlocked(ids: string[]): void;
+  setActiveBoosters(boosters: ActiveBooster[]): void;
+  addActiveBooster(booster: ActiveBooster): void;
+  updateProfileIdentity(patch: Partial<Pick<Profile, 'name' | 'username' | 'isPublic'>>): void;
+  reconcileVerifiedActivity(payload: VerifiedActivityReconciliation): void;
+  applyCloudSnapshot(snapshot: Partial<PersistedState>): void;
   resetProgress(): void;
   select(poi: Poi | null): void;
 }
 
 export type GameState = PersistedState & RuntimeState & Actions;
+
+export const EMPTY_COINS_BY_KIND: CoinsByKind = {
+  bronze: 0, silver: 0, gold: 0, gem: 0,
+};
 
 export const EMPTY_TOTALS: Totals = {
   distanceM: 0, movingS: 0, activities: 0, coinsValue: 0, coinsCount: 0, captures: 0, cells: 0,
@@ -78,15 +155,44 @@ export const DEFAULT_PERSISTED: PersistedState = {
   captures: {},
   cities: {},
   activities: [],
+  achievements: {},
   settings: { sound: true, haptics: true, simulator: false },
   coins: [],
   live: null,
+  route: null,
 };
 
 let toastSeq = 1;
 
 export function uid(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+}
+
+/** Retorna o multiplicador ativo para uma categoria de booster (1 se não houver ativo). */
+export function activeBoosterMultiplier(
+  boosters: readonly ActiveBooster[],
+  category: BoosterCategory,
+  boostUsageIds?: readonly string[],
+  now = Date.now(),
+): number {
+  for (const b of boosters) {
+    if (b.category !== category) continue;
+    if (b.expiresAt < now) continue;
+    if (boostUsageIds && !boostUsageIds.includes(b.usageId)) continue;
+    return Math.max(1, Math.min(5, Number.isFinite(b.multiplier) ? b.multiplier : 1));
+  }
+  return 1;
+}
+
+/** Raio de revelação efetivo considerando eventual booster `boost_fog` ligado à atividade atual. */
+export function effectiveRevealRadius(
+  s: Pick<GameState, 'live' | 'activeBoosters'> = useGame.getState(),
+  now = Date.now(),
+): number {
+  const fogMult = s.live
+    ? activeBoosterMultiplier(s.activeBoosters, 'boost_fog', s.live.boostUsageIds, now)
+    : 1;
+  return REVEAL_RADIUS_M * fogMult;
 }
 
 /** Tempo de cronômetro da atividade em segundos, considerando o trecho em andamento. */
@@ -97,23 +203,52 @@ export function liveElapsed(live: LiveActivity, now = Date.now()): number {
 export const useGame = create<GameState>()((set, get) => ({
   ...DEFAULT_PERSISTED,
   hydrated: false,
-  tab: 'record',
+  tab: 'map',
   fix: null,
   gps: 'off',
   toasts: [],
   modals: [],
   speedWarning: false,
   poiRev: 0,
+  socialRev: 0,
   currentCityId: null,
   selected: null,
+  planning: false,
+  routeProgress: null,
+  rerouting: 'idle',
+  syncing: false,
+  lastSyncError: null,
+  lastSyncedAt: null,
+  authUserId: null,
+  authEmail: null,
+  authLoading: false,
+  pendingInviteUsername: null,
+  pendingMigration: null,
+  activeBoosters: [],
 
-  createProfile(name, characterId, modality) {
-    set({ profile: { name: name.trim() || 'Viajante', characterId, modality, createdAt: Date.now() }, tab: 'record' });
+  createProfile(name, avatar, modality, characterId = 'custom', opts) {
+    set({
+      profile: {
+        name: name.trim() || 'Viajante',
+        characterId,
+        avatar,
+        modality,
+        createdAt: Date.now(),
+        ...(opts?.username ? { username: opts.username } : {}),
+        ...(opts?.isPublic !== undefined ? { isPublic: opts.isPublic } : {}),
+      },
+      tab: 'map',
+    });
   },
   setModality(m) {
     const p = get().profile;
     if (!p || get().live) return;
     set({ profile: { ...p, modality: m } });
+  },
+  setAvatar(avatar, characterId) {
+    const p = get().profile;
+    if (!p) return;
+    set({ profile: { ...p, avatar, characterId: characterId ?? p.characterId } });
   },
   setCharacter(id) {
     const p = get().profile;
@@ -130,13 +265,23 @@ export const useGame = create<GameState>()((set, get) => ({
   setTab(t) {
     set({ tab: t });
   },
+  setPlanning(open) {
+    if (open && get().live) return;
+    // fechar sem iniciar descarta a rota planejada (ao iniciar, startActivity fecha a folha e a rota fica)
+    if (open) set({ planning: true, tab: 'map', selected: null });
+    else set({ planning: false, route: get().live ? get().route : null });
+  },
+  setRoute(route) {
+    set({ route, routeProgress: null, rerouting: 'idle' });
+  },
   setSetting(k, v) {
     set({ settings: { ...get().settings, [k]: v } });
   },
   toast(text, kind = 'info', coinKind) {
     const t: Toast = { id: toastSeq++, text, kind, coinKind };
     set({ toasts: [...get().toasts.slice(-3), t] });
-    setTimeout(() => get().dismissToast(t.id), kind === 'coin' ? 1600 : 3200);
+    const ms = kind === 'coin' ? 1600 : kind === 'achievement' ? 3800 : 3200;
+    setTimeout(() => get().dismissToast(t.id), ms);
   },
   dismissToast(id) {
     set({ toasts: get().toasts.filter((t) => t.id !== id) });
@@ -150,10 +295,15 @@ export const useGame = create<GameState>()((set, get) => ({
   addXp(n) {
     if (n <= 0) return;
     const s = get();
+    const xpMult = s.live
+      ? activeBoosterMultiplier(s.activeBoosters, 'boost_xp', s.live.boostUsageIds)
+      : 1;
+    const gained = Math.round(n * xpMult);
+    if (gained <= 0) return;
     const before = levelFromXp(s.xp).level;
-    const xp = s.xp + n;
+    const xp = s.xp + gained;
     const after = levelFromXp(xp);
-    const live = s.live ? { ...s.live, xp: s.live.xp + n } : null;
+    const live = s.live ? { ...s.live, xp: s.live.xp + gained } : null;
     set({ xp, live });
     if (after.level > before) get().pushModal({ type: 'levelup', level: after.level, title: after.title });
   },
@@ -162,6 +312,13 @@ export const useGame = create<GameState>()((set, get) => ({
     const s = get();
     if (!s.profile || s.live) return;
     const now = Date.now();
+    const seenCats = new Set<BoosterCategory>();
+    const boostUsageIds: string[] = [];
+    for (const b of s.activeBoosters) {
+      if (b.expiresAt <= now || seenCats.has(b.category)) continue;
+      seenCats.add(b.category);
+      boostUsageIds.push(b.usageId);
+    }
     const live: LiveActivity = {
       id: uid('act'),
       modality: s.profile.modality,
@@ -174,15 +331,19 @@ export const useGame = create<GameState>()((set, get) => ({
       maxSpeed: 0,
       coinsValue: 0,
       coinsCount: 0,
+      coinsByKind: { ...EMPTY_COINS_BY_KIND },
       captures: [],
       newCells: 0,
       xp: 0,
       cityIds: [],
+      source: 'live',
+      verificationStatus: 'local',
+      ...(boostUsageIds.length ? { boostUsageIds } : {}),
       spawnCenters: [],
       spawns: 0,
     };
     // A cada nova atividade, as moedas antigas somem e um lote novo nasce (ver tracker).
-    set({ live, coins: [] });
+    set({ live, coins: [], planning: false, tab: 'map' });
   },
   pauseActivity() {
     const live = get().live;
@@ -209,14 +370,21 @@ export const useGame = create<GameState>()((set, get) => ({
       maxSpeed: live.maxSpeed,
       coinsValue: live.coinsValue,
       coinsCount: live.coinsCount,
+      coinsByKind: live.coinsByKind ? { ...live.coinsByKind } : { ...EMPTY_COINS_BY_KIND },
       captures: live.captures,
       newCells: live.newCells,
       xp: live.xp,
       cityIds: live.cityIds,
+      source: live.source ?? 'live',
+      verificationStatus: 'local',
+      verificationReason: null,
+      ...(live.boostUsageIds?.length ? { boostUsageIds: [...live.boostUsageIds] } : {}),
     };
     const t = s.totals;
     set({
       live: null,
+      route: null,
+      routeProgress: null,
       activities: [summary, ...s.activities].slice(0, 200),
       totals: {
         ...t,
@@ -229,19 +397,32 @@ export const useGame = create<GameState>()((set, get) => ({
     return summary;
   },
   discardActivity() {
-    set({ live: null });
+    set({ live: null, route: null, routeProgress: null });
   },
 
   collectCoin(coin) {
     const s = get();
     const value = COIN_VALUE[coin.kind];
+    const coinsMult = s.live
+      ? activeBoosterMultiplier(s.activeBoosters, 'boost_coins', s.live.boostUsageIds)
+      : 1;
+    const walletCredit = Math.round(value * coinsMult);
+    const prevKinds = s.live?.coinsByKind ?? EMPTY_COINS_BY_KIND;
     set({
       coins: s.coins.filter((c) => c.id !== coin.id),
-      wallet: s.wallet + value,
+      wallet: s.wallet + walletCredit,
       totals: { ...s.totals, coinsValue: s.totals.coinsValue + value, coinsCount: s.totals.coinsCount + 1 },
-      live: s.live ? { ...s.live, coinsValue: s.live.coinsValue + value, coinsCount: s.live.coinsCount + 1 } : null,
+      live: s.live
+        ? {
+            ...s.live,
+            // Manter valor base para paridade estrita com `coinsByKind` na Edge Function `verify-activity`.
+            coinsValue: s.live.coinsValue + value,
+            coinsCount: s.live.coinsCount + 1,
+            coinsByKind: { ...prevKinds, [coin.kind]: (prevKinds[coin.kind] ?? 0) + 1 },
+          }
+        : null,
     });
-    get().addXp(value);
+    get().addXp(Math.max(1, Math.ceil(value * XP.perCoinValue)));
   },
   capturePoi(poi, cityId) {
     const s = get();
@@ -257,8 +438,156 @@ export const useGame = create<GameState>()((set, get) => ({
     get().addXp(xp);
     return capture;
   },
+  grantAchievements(unlocks, opts) {
+    if (!unlocks.length) return 0;
+    const s = get();
+    const fresh = unlocks.filter((u) => !s.achievements[u.key]);
+    if (!fresh.length) return 0;
+    const now = Date.now();
+    const nextAchievements: Record<string, AchievementRecord> = { ...s.achievements };
+    let totalCoins = 0;
+    for (const u of fresh) {
+      if (nextAchievements[u.key]) continue;
+      nextAchievements[u.key] = { at: now, coins: u.coins };
+      totalCoins += u.coins;
+    }
+    set({
+      achievements: nextAchievements,
+      wallet: s.wallet + totalCoins,
+    });
+    if (opts?.batchToast || fresh.length >= 3) {
+      const label = fresh.length === 1 ? 'conquista desbloqueada' : 'conquistas desbloqueadas';
+      get().toast(`${fresh.length} ${label}! +${totalCoins.toLocaleString('pt-BR')} moedas`, 'achievement');
+    } else {
+      for (const unlock of fresh) get().pushModal({ type: 'achievement', unlock });
+    }
+    return totalCoins;
+  },
+  setSyncState(patch) {
+    set(patch);
+  },
+  setAuthState(patch) {
+    set(patch);
+  },
+  setPendingInviteUsername(username) {
+    set({ pendingInviteUsername: username });
+  },
+  setPendingMigration(migration) {
+    set({ pendingMigration: migration });
+  },
+  bumpSocialRev() {
+    set({ socialRev: get().socialRev + 1 });
+  },
+  setWallet(wallet) {
+    if (!Number.isFinite(wallet)) return;
+    set({ wallet: Math.max(0, Math.round(wallet)) });
+  },
+  grantUnlocked(ids) {
+    if (!ids.length) return;
+    const cur = get().unlocked;
+    const merged = [...new Set([...cur, ...ids])];
+    if (merged.length !== cur.length) {
+      set({ unlocked: merged });
+    }
+  },
+  setActiveBoosters(boosters) {
+    const now = Date.now();
+    set({ activeBoosters: boosters.filter((b) => b.expiresAt > now) });
+  },
+  addActiveBooster(booster) {
+    const s = get();
+    const now = Date.now();
+    const filtered = s.activeBoosters.filter(
+      (b) => b.expiresAt > now && b.usageId !== booster.usageId && b.category !== booster.category,
+    );
+    const nextBoosters = [...filtered, booster];
+    let nextLive = s.live;
+    if (nextLive) {
+      const existingIds = nextLive.boostUsageIds ?? [];
+      const hasCat = existingIds.some((id) =>
+        s.activeBoosters.some((b) => b.usageId === id && b.category === booster.category && b.expiresAt >= now),
+      );
+      if (!hasCat && !existingIds.includes(booster.usageId)) {
+        nextLive = { ...nextLive, boostUsageIds: [...existingIds, booster.usageId] };
+      }
+    }
+    set({ activeBoosters: nextBoosters, live: nextLive });
+  },
+  updateProfileIdentity(patch) {
+    const p = get().profile;
+    if (!p) return;
+    set({ profile: { ...p, ...patch } });
+  },
+  reconcileVerifiedActivity(payload) {
+    const s = get();
+    const now = Date.now();
+    const targetAct = s.activities.find((a) => a.id === payload.activityId);
+    const consumedIds = new Set(targetAct?.boostUsageIds ?? []);
+    const activities = s.activities.map((a) => {
+      if (a.id !== payload.activityId) return a;
+      return {
+        ...a,
+        verificationStatus: payload.verificationStatus,
+        verificationReason: payload.verificationReason ?? null,
+        distanceM: payload.distanceM ?? a.distanceM,
+        movingS: payload.movingS ?? a.movingS,
+        maxSpeed: payload.maxSpeed ?? a.maxSpeed,
+        xp: payload.xpEarned ?? a.xp,
+        coinsValue: payload.coinsEarned ?? a.coinsValue,
+        newCells: payload.newCells ?? a.newCells,
+      };
+    });
+    const auth = payload.authoritative;
+    set({
+      activities,
+      activeBoosters: s.activeBoosters.filter((b) => b.expiresAt > now && !consumedIds.has(b.usageId)),
+      xp: auth.xp,
+      wallet: auth.wallet,
+      totals: {
+        ...s.totals,
+        distanceM: auth.totalDistanceM,
+        movingS: auth.totalMovingS,
+        activities: auth.totalActivities,
+        captures: auth.totalCaptures,
+        cells: Math.max(s.totals.cells, auth.totalCells),
+      },
+      profile: s.profile ? { ...s.profile, cloudSyncedAt: now } : null,
+      cloudSyncedAt: now,
+      lastSyncedAt: now,
+      lastSyncError: null,
+    });
+  },
+  applyCloudSnapshot(snapshot) {
+    const s = get();
+    set({
+      ...snapshot,
+      profile: snapshot.profile !== undefined ? snapshot.profile : s.profile,
+      totals: snapshot.totals ? { ...s.totals, ...snapshot.totals } : s.totals,
+      settings: snapshot.settings ? { ...s.settings, ...snapshot.settings } : s.settings,
+      captures: snapshot.captures ?? s.captures,
+      cities: snapshot.cities ?? s.cities,
+      activities: snapshot.activities ?? s.activities,
+      achievements: snapshot.achievements ?? s.achievements,
+      unlocked: snapshot.unlocked ?? s.unlocked,
+    });
+  },
   resetProgress() {
-    set({ ...DEFAULT_PERSISTED, tab: 'record', modals: [], toasts: [], selected: null });
+    set({
+      ...DEFAULT_PERSISTED,
+      cloudUserId: undefined,
+      cloudSyncedAt: undefined,
+      syncing: false,
+      lastSyncError: null,
+      lastSyncedAt: null,
+      pendingMigration: null,
+      activeBoosters: [],
+      tab: 'map',
+      modals: [],
+      toasts: [],
+      selected: null,
+      planning: false,
+      routeProgress: null,
+    });
   },
   select(poi) {
     set({ selected: poi });
@@ -276,8 +605,12 @@ export function pickPersisted(s: GameState): PersistedState {
     captures: s.captures,
     cities: s.cities,
     activities: s.activities,
+    achievements: s.achievements,
     settings: s.settings,
     coins: s.coins,
     live: s.live,
+    route: s.route,
+    ...(s.cloudUserId !== undefined ? { cloudUserId: s.cloudUserId } : {}),
+    ...(s.cloudSyncedAt !== undefined ? { cloudSyncedAt: s.cloudSyncedAt } : {}),
   };
 }

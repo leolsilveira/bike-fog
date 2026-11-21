@@ -1,6 +1,5 @@
 // Moedas e emblemas de pontos capturáveis (POIs).
-import type { Art, Palette } from './pixel.ts';
-import { rasterize, createRaster, blit, blendPixel, hexToRgba, type Raster } from './pixel.ts';
+import { rasterize, createRaster, blit, blendPixel, hexToRgba, type Art, type Palette, type Raster } from './pixel.ts';
 
 const O = '#2a1f3d';
 
@@ -154,11 +153,11 @@ export function coinFrames(kind: CoinKind): Raster[] {
 export type Rarity = 'comum' | 'incomum' | 'raro' | 'epico' | 'lendario';
 export const RARITIES: Rarity[] = ['comum', 'incomum', 'raro', 'epico', 'lendario'];
 export const RARITY_INFO: Record<Rarity, { label: string; color: string; dark: string; xp: number; stars: number }> = {
-  comum: { label: 'Comum', color: '#8fd16a', dark: '#4f8f3a', xp: 40, stars: 1 },
-  incomum: { label: 'Incomum', color: '#4fb3ff', dark: '#2a6fb8', xp: 80, stars: 2 },
-  raro: { label: 'Raro', color: '#b77bff', dark: '#7440c0', xp: 160, stars: 3 },
-  epico: { label: 'Épico', color: '#ff9f3d', dark: '#c0601a', xp: 320, stars: 4 },
-  lendario: { label: 'Lendário', color: '#ff5f8f', dark: '#c02a5a', xp: 640, stars: 5 },
+  comum: { label: 'Comum', color: '#8fd16a', dark: '#4f8f3a', xp: 25, stars: 1 },
+  incomum: { label: 'Incomum', color: '#4fb3ff', dark: '#2a6fb8', xp: 40, stars: 2 },
+  raro: { label: 'Raro', color: '#b77bff', dark: '#7440c0', xp: 75, stars: 3 },
+  epico: { label: 'Épico', color: '#ff9f3d', dark: '#c0601a', xp: 150, stars: 4 },
+  lendario: { label: 'Lendário', color: '#ff5f8f', dark: '#c02a5a', xp: 300, stars: 5 },
 };
 
 export type PoiCategory =

@@ -1,4 +1,4 @@
-name: Deploy no GitHub Pages
+name: Deploy da versão web no GitHub Pages
 
 on:
   push:
@@ -21,10 +21,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
+      # o postinstall gera o mapa embutido (map-runtime → src/map/mapHtml.generated.ts)
       - run: npm ci
-      - run: npm run build
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npx expo export --platform web
+        env:
+          EXPO_BASE_URL: /${{ github.event.repository.name }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

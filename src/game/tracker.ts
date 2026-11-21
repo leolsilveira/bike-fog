@@ -1,29 +1,38 @@
 // Recebe cada posição (GPS real ou simulador) e aplica as regras do jogo.
 import {
   COINS_PER_SPAWN, COIN_PICKUP_M, COIN_SPAWN_RADIUS_M, MAX_ACCURACY_M, MAX_SPAWNS_PER_ACTIVITY, MAX_SPEED,
-  RESPAWN_DISTANCE_M, REVEAL_RADIUS_M, XP,
+  RESPAWN_DISTANCE_M, XP,
 } from './config.ts';
 import { haversine, metersPerMercUnit, toMerc, type LngLat } from './geo.ts';
 import { fog } from './fog.ts';
 import { pois } from './pois.ts';
 import { spawnCoins, type RoadSampler } from './coins.ts';
 import { bumpCityCells, cityAtSync, ensureCityAt } from './cities.ts';
-import { useGame } from './store.ts';
-import { sfx, vibrate } from './audio.ts';
+import { checkAndGrantAchievements } from './achievements.ts';
+import { activeBoosterMultiplier, effectiveRevealRadius, useGame } from './store.ts';
+import { haptic, sfx, vibrate } from './audio.ts';
 import { loadTrack, saveTrack } from './persist.ts';
+import { roadsNear, waitForTiles } from './tiles.ts';
 import { COIN_LABEL, COIN_VALUE, POI_INFO } from '../sprites/items.ts';
+import type { PlayerFix } from './types.ts';
 
 const MAX_CAPTURE_M = Math.max(...Object.values(POI_INFO).map((i) => i.radius));
-import type { PlayerFix } from './types.ts';
+/** Quanto esperar as ruas em volta carregarem antes de espalhar moedas. */
+const SPAWN_WAIT_MS = 4000;
 
 let last: PlayerFix | null = null;
 let track: number[] = [];
 let trackSavedLen = 0;
 let distXpAcc = 0;
+/** XP de células é fracionário (0,1–0,2 por célula): acumula até fechar um ponto. */
+let cellXpAcc = 0;
+/** Substitui a fonte de ruas (testes). Padrão: ruas dos tiles carregados por tiles.ts. */
 let roadSampler: RoadSampler | null = null;
+/** Spawn em andamento (esperando os tiles): evita lotes duplicados. */
+let spawning = false;
 const trackListeners = new Set<(track: number[]) => void>();
 
-export function setRoadSampler(fn: RoadSampler): void {
+export function setRoadSampler(fn: RoadSampler | null): void {
   roadSampler = fn;
 }
 
@@ -52,50 +61,78 @@ function distToSegment(p: LngLat, a: LngLat, b: LngLat): number {
   return Math.sqrt(dx * dx + dy * dy) * k;
 }
 
-function spawnAround(p: LngLat): void {
-  const s = useGame.getState();
-  const live = s.live;
-  if (!live || live.spawns >= MAX_SPAWNS_PER_ACTIVITY) return;
-  const fresh = spawnCoins(p, COINS_PER_SPAWN, COIN_SPAWN_RADIUS_M, roadSampler, s.coins);
-  useGame.setState({
-    coins: [...s.coins, ...fresh],
-    live: { ...live, spawns: live.spawns + 1, spawnCenters: [...live.spawnCenters, { lng: p.lng, lat: p.lat }] },
-  });
-  if (live.spawns > 0) s.toast(`${fresh.length} moedas novas apareceram por aqui!`, 'info');
+/**
+ * Espalha um lote de moedas sobre as ruas em volta de p. Espera (até ~4 s) os tiles em volta
+ * carregarem, para as moedas caírem nas ruas; sem rede, cai no disco em volta do ponto.
+ */
+async function spawnAround(p: LngLat): Promise<void> {
+  const before = useGame.getState().live;
+  if (spawning || !before || before.spawns >= MAX_SPAWNS_PER_ACTIVITY) return;
+  spawning = true;
+  try {
+    if (!roadSampler) await waitForTiles(p, COIN_SPAWN_RADIUS_M, SPAWN_WAIT_MS);
+    const s = useGame.getState();
+    const live = s.live;
+    // a atividade terminou, trocou ou já ganhou esse lote enquanto esperávamos
+    if (!live || live.id !== before.id || live.spawns !== before.spawns) return;
+    const sampler: RoadSampler = roadSampler ?? (() => roadsNear(p, COIN_SPAWN_RADIUS_M));
+    const fresh = spawnCoins(p, COINS_PER_SPAWN, COIN_SPAWN_RADIUS_M, sampler, s.coins);
+    useGame.setState({
+      coins: [...s.coins, ...fresh],
+      live: { ...live, spawns: live.spawns + 1, spawnCenters: [...live.spawnCenters, { lng: p.lng, lat: p.lat }] },
+    });
+    if (live.spawns > 0) s.toast(`${fresh.length} moedas novas apareceram por aqui!`, 'info');
+  } catch (err) {
+    console.warn('[tracker] spawn falhou', err);
+  } finally {
+    spawning = false;
+  }
 }
 
-function collectNear(a: LngLat, b: LngLat): void {
+function collectNear(a: LngLat, b: LngLat): boolean {
   const s = useGame.getState();
+  let collected = false;
   for (const coin of s.coins) {
     if (distToSegment(coin, a, b) > COIN_PICKUP_M) continue;
-    useGame.getState().collectCoin(coin);
+    const cur = useGame.getState();
+    const coinsMult = cur.live
+      ? activeBoosterMultiplier(cur.activeBoosters, 'boost_coins', cur.live.boostUsageIds)
+      : 1;
+    cur.collectCoin(coin);
     const value = COIN_VALUE[coin.kind];
+    const displayValue = Math.round(value * coinsMult);
     if (coin.kind === 'gem') sfx.gem();
     else if (value >= 20) sfx.coinBig();
     else sfx.coin();
     vibrate(30);
-    useGame.getState().toast(`+${value} · ${COIN_LABEL[coin.kind]}`, 'coin', coin.kind);
+    useGame.getState().toast(`+${displayValue} · ${COIN_LABEL[coin.kind]}`, 'coin', coin.kind);
+    collected = true;
   }
+  return collected;
 }
 
-function captureNear(a: LngLat, b: LngLat): void {
+function captureNear(a: LngLat, b: LngLat): boolean {
   const s = useGame.getState();
   const found = pois.nearby(b, MAX_CAPTURE_M + haversine(a, b), (poi) => !s.captures[poi.id]);
+  let captured = false;
   for (const { poi } of found) {
     if (distToSegment(poi, a, b) > POI_INFO[poi.category].radius) continue;
     useGame.getState().capturePoi(poi, cityAtSync(poi));
     sfx.capture();
     vibrate([60, 40, 120]);
+    captured = true;
   }
+  return captured;
 }
 
-function persistTrack(force = false): void {
+function persistTrack(force = false): Promise<void> {
   const live = useGame.getState().live;
-  if (!live) return;
+  if (!live || track.length === trackSavedLen) return Promise.resolve();
   if (force || track.length - trackSavedLen >= 60) {
     trackSavedLen = track.length;
-    void saveTrack(live.id, track);
+    return saveTrack(live.id, track);
   }
+  return Promise.resolve();
 }
 
 export function handleFix(fix: PlayerFix): void {
@@ -116,7 +153,7 @@ export function handleFix(fix: PlayerFix): void {
     last = fix;
     track.push(fix.lng, fix.lat, fix.t);
     emitTrack();
-    if (live.spawnCenters.length === 0) spawnAround(fix);
+    if (live.spawnCenters.length === 0) void spawnAround(fix);
     revealAndCollect(fix, fix);
     return;
   }
@@ -132,6 +169,7 @@ export function handleFix(fix: PlayerFix): void {
     if (!s.speedWarning) {
       useGame.setState({ speedWarning: true });
       sfx.warn();
+      haptic('warning');
     }
     last = fix;
     return;
@@ -155,18 +193,18 @@ export function handleFix(fix: PlayerFix): void {
 
   track.push(fix.lng, fix.lat, fix.t);
   emitTrack();
-  persistTrack();
+  void persistTrack();
 
   revealAndCollect(last, fix);
 
   const centers = useGame.getState().live?.spawnCenters ?? [];
-  if (centers.length && centers.every((c) => haversine(c, fix) > RESPAWN_DISTANCE_M)) spawnAround(fix);
+  if (centers.length && centers.every((c) => haversine(c, fix) > RESPAWN_DISTANCE_M)) void spawnAround(fix);
 
   last = fix;
 }
 
 function revealAndCollect(a: PlayerFix, b: PlayerFix): void {
-  const { added, byCity } = fog.revealAlong(a, b, REVEAL_RADIUS_M, cityAtSync);
+  const { added, byCity } = fog.revealAlong(a, b, effectiveRevealRadius(useGame.getState(), b.t), cityAtSync);
   if (added.length) {
     for (const [id, n] of Object.entries(byCity)) bumpCityCells(id, n);
     const st = useGame.getState();
@@ -177,13 +215,18 @@ function revealAndCollect(a: PlayerFix, b: PlayerFix): void {
       live: { ...live, newCells: live.newCells + added.length, cityIds },
       totals: { ...st.totals, cells: st.totals.cells + added.length },
     });
-    useGame.getState().addXp(added.length * XP.perCell);
+    cellXpAcc += added.length * XP.perCell[live.modality];
+    const cellXp = Math.floor(cellXpAcc);
+    cellXpAcc -= cellXp;
+    if (cellXp) useGame.getState().addXp(cellXp);
   }
-  collectNear(a, b);
-  captureNear(a, b);
+  const gotCoin = collectNear(a, b);
+  const gotPoi = captureNear(a, b);
+  if (gotCoin || gotPoi) checkAndGrantAchievements();
+  else checkAndGrantAchievements({ throttleMs: 1500 });
 }
 
-/** Restaura a trilha de uma atividade interrompida (recarregou a página no meio). */
+/** Restaura a trilha de uma atividade interrompida (o app foi fechado no meio). */
 export async function restoreLiveTrack(): Promise<void> {
   const live = useGame.getState().live;
   if (!live) return;
@@ -203,13 +246,14 @@ export function onActivityChange(): void {
     track = [];
     trackSavedLen = 0;
     distXpAcc = 0;
+    cellXpAcc = 0;
     emitTrack();
     useGame.setState({ speedWarning: false });
   }
 }
 
 export async function finishAndSaveTrack(): Promise<void> {
-  persistTrack(true);
+  await persistTrack(true);
 }
 
 /** Esquece a última posição (teletransporte do simulador não conta como deslocamento). */

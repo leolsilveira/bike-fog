@@ -1,9 +1,11 @@
 // Cidades: descobre o município onde o jogador está (Nominatim/OSM), guarda o polígono
 // e calcula o percentual explorado = área das células visitadas / área do município.
-import { areaBBox, areaM2, cellSizeM, inBBox, pointInArea, haversine, type AreaGeometry, type LngLat } from './geo.ts';
+import { areaBBox, areaM2, cellSizeM, inBBox, pointInArea, type AreaGeometry, type LngLat } from './geo.ts';
 import { fog } from './fog.ts';
+import { checkAndGrantAchievements } from './achievements.ts';
 import { useGame } from './store.ts';
 import { getKv, setKv } from './persist.ts';
+import { fetchWithTimeout } from './net.ts';
 import type { City } from './types.ts';
 
 const NOMINATIM = 'https://nominatim.openstreetmap.org/reverse';
@@ -82,13 +84,14 @@ export async function ensureCityAt(p: LngLat): Promise<string | null> {
   if (known) return known;
   if (inflight) return inflight;
   const now = Date.now();
-  if (lastQuery && now - lastQuery.t < 20000 && haversine(lastQuery.p, p) < 3000) return null;
+  // no máximo 1 consulta a cada 20 s, mesmo se o jogador "pular" longe (teleporte do simulador)
+  if (lastQuery && now - lastQuery.t < 20000) return null;
   lastQuery = { p, t: now };
   inflight = (async () => {
     try {
       const url = `${NOMINATIM}?format=jsonv2&lat=${p.lat.toFixed(5)}&lon=${p.lng.toFixed(5)}` +
         `&zoom=10&polygon_geojson=1&polygon_threshold=0.0005&accept-language=pt-BR`;
-      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      const res = await fetchWithTimeout(url, 20000, { Accept: 'application/json' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as NominatimResult;
       if (data.error || !data.geojson || !data.osm_id) return null;
@@ -115,6 +118,7 @@ export async function ensureCityAt(p: LngLat): Promise<string | null> {
       fog.assignPending(cityAtSync);
       recountCities();
       if (isNew) useGame.getState().toast(`Nova cidade descoberta: ${name}!`, 'city');
+      checkAndGrantAchievements();
       return id;
     } catch (err) {
       console.warn('[cidades] geocodificação falhou', err);
