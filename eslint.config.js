@@ -5,8 +5,8 @@ const expoConfig = require('eslint-config-expo/flat');
 module.exports = defineConfig([
   expoConfig,
   {
-    // saídas de build e o HTML do mapa embutido (gerado por `npm run build:map`)
-    ignores: ['dist/*', 'map-runtime/dist/*', 'src/map/mapHtml.generated.ts'],
+    // saídas de build, o HTML do mapa embutido e Edge Functions Deno (usam jsr:/Deno.serve)
+    ignores: ['dist/*', 'map-runtime/dist/*', 'src/map/mapHtml.generated.ts', 'supabase/functions/**'],
   },
   {
     // módulos virtuais do Vite (ex.: o worker do MapLibre) só existem durante o build do mapa
