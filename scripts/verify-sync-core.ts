@@ -27,6 +27,7 @@ import type { ActivitySummary, Capture, City } from '../src/game/types.ts';
 import { safeFileName } from '../src/services/fileName.ts';
 import { sessionStorage as webSessionStorage } from '../src/services/sessionStorage.web.ts';
 import {
+  isValidAvatarConfig,
   pullCloudToLocal,
   pushAllLocalToCloud,
   syncAchievements,
@@ -37,6 +38,12 @@ import {
   type FogSyncState,
   type SyncDeps,
 } from '../src/services/syncCore.ts';
+import {
+  avatarFrame,
+  avatarFromCharacter,
+  avatarKey,
+  resolveAvatar,
+} from '../src/sprites/avatar.ts';
 import { COIN_VALUE, POI_INFO, RARITY_INFO } from '../src/sprites/items.ts';
 
 try {
@@ -208,7 +215,228 @@ test('3. sessionStorage.web e fluxo criptográfico LargeSecureStore', () => {
   assert.notEqual(safeFileName('sb:auth/token'), safeFileName('sb_auth_token'));
 });
 
-test('4. Integração ao vivo no Supabase (lugwebngeyadfrqoapsg): syncProfile, syncActivity, syncCitiesAndCaptures, syncFog, syncAchievements, pullCloudToLocal', async (t) => {
+test('4. syncFog: aborta sem upload nem upsert_fog_state quando download da névoa remota falha ou vem corrompido', async () => {
+  fog.clear();
+  useGame.getState().resetProgress();
+
+  const localCell = cellOf({ lng: -46.6559, lat: -23.5614 });
+  fog.load({
+    keys: new Float64Array([localCell]),
+    city: new Uint16Array([0]),
+    cityIds: [''],
+  });
+
+  const userId = '00000000-0000-0000-0000-000000000042';
+  let fogRow: { storage_path: string; cell_count: number; revision: number } | null = {
+    storage_path: `${userId}/fog.bin.gz`,
+    cell_count: 500,
+    revision: 7,
+  };
+  let downloadResult: { data: Blob | null; error: { message: string } | null } = {
+    data: null,
+    error: { message: 'network timeout' },
+  };
+  let uploadCalls = 0;
+  let rpcCalls = 0;
+  let fogSyncState: FogSyncState = { revision: 0, lastSyncedAt: null };
+
+  const mockClient = {
+    from: (table: string) => {
+      assert.equal(table, 'user_fog_state');
+      return {
+        select: () => ({
+          eq: () => ({
+            maybeSingle: async () => ({ data: fogRow, error: null }),
+          }),
+        }),
+      };
+    },
+    storage: {
+      from: (bucket: string) => {
+        assert.equal(bucket, 'fog-snapshots');
+        return {
+          download: async () => downloadResult,
+          upload: async () => {
+            uploadCalls++;
+            return { error: null };
+          },
+        };
+      },
+    },
+    rpc: async (fn: string) => {
+      assert.equal(fn, 'upsert_fog_state');
+      rpcCalls++;
+      return {
+        data: {
+          conflict: false,
+          revision: 1,
+          storage_path: `${userId}/fog.bin.gz`,
+          cell_count: 1,
+          total_cells: 1,
+        },
+        error: null,
+      };
+    },
+  } as unknown as SupabaseClient;
+
+  const deps: SyncDeps = {
+    client: mockClient,
+    userId,
+    loadTrack: async () => undefined,
+    fogSync: {
+      get: async () => fogSyncState,
+      set: async (next) => {
+        fogSyncState = next;
+      },
+    },
+  };
+
+  // 4a. Erro no download -> rejeita antes de qualquer upload ou RPC
+  await assert.rejects(() => syncFog(deps), /Falha ao baixar snapshot de névoa/);
+  assert.equal(uploadCalls, 0, 'Não pode chamar storage.upload após erro no download');
+  assert.equal(rpcCalls, 0, 'Não pode chamar upsert_fog_state após erro no download');
+  assert.equal(fog.size, 1, 'Névoa local deve permanecer preservada');
+
+  // 4b. Bytes corrompidos no download -> rejeita antes de qualquer upload ou RPC
+  downloadResult = {
+    data: new Blob([new Uint8Array([0x01, 0x02, 0x03, 0x04])]),
+    error: null,
+  };
+  await assert.rejects(() => syncFog(deps), /Snapshot de névoa remoto inválido/);
+  assert.equal(uploadCalls, 0, 'Não pode chamar storage.upload com snapshot corrompido');
+  assert.equal(rpcCalls, 0, 'Não pode chamar upsert_fog_state com snapshot corrompido');
+
+  // 4c. Ausência de snapshot remoto (fogRow == null) -> trata como vazio e envia normalmente
+  fogRow = null;
+  const ok = await syncFog(deps);
+  assert.equal(uploadCalls, 1);
+  assert.equal(rpcCalls, 1);
+  assert.equal(ok.revision, 1);
+
+  fog.clear();
+  useGame.getState().resetProgress();
+});
+
+test('5. avatar_config: pullCloudToLocal rejeita {} / malformado e syncProfile envia AvatarConfig válido', async () => {
+  fog.clear();
+  useGame.getState().resetProgress();
+
+  const userId = '00000000-0000-0000-0000-000000000043';
+  const updatedPayloads: Array<Record<string, unknown>> = [];
+  let remoteAvatarConfig: unknown = {};
+
+  const buildQuery = (data: unknown) => ({
+    select: () => ({
+      eq: () => ({
+        single: async () => ({ data, error: null }),
+        maybeSingle: async () => ({ data, error: null }),
+        order: () => ({
+          limit: async () => ({ data: [], error: null }),
+        }),
+        then: (resolve: (v: { data: unknown; error: null }) => void) =>
+          Promise.resolve({ data, error: null }).then(resolve),
+      }),
+    }),
+  });
+
+  const mockClient = {
+    from: (table: string) => {
+      if (table === 'profiles') {
+        return {
+          update: (payload: Record<string, unknown>) => ({
+            eq: async () => {
+              updatedPayloads.push(payload);
+              return { error: null };
+            },
+          }),
+          ...buildQuery({
+            id: userId,
+            username: 'ciclista_teste',
+            display_name: 'Ciclista Teste',
+            modality: 'bike',
+            character_id: 'teo',
+            avatar_config: remoteAvatarConfig,
+            xp: 0,
+            level: 1,
+            wallet: 0,
+            total_distance_m: 0,
+            total_moving_s: 0,
+            total_activities: 0,
+            total_coins_value: 0,
+            total_coins_count: 0,
+            total_captures: 0,
+            total_cells: 0,
+            achievements_count: 0,
+            settings: { sound: true, haptics: true },
+            is_public: false,
+            created_at: new Date().toISOString(),
+          }),
+        };
+      }
+      if (table === 'user_fog_state') {
+        return buildQuery(null);
+      }
+      return buildQuery([]);
+    },
+  } as unknown as SupabaseClient;
+
+  const deps: SyncDeps = {
+    client: mockClient,
+    userId,
+    loadTrack: async () => undefined,
+  };
+
+  // 5a. syncProfile com profile.avatar === undefined envia avatarFromCharacter('teo'), nunca {}
+  useGame.setState({
+    profile: {
+      name: 'Legado Sem Avatar',
+      characterId: 'teo',
+      modality: 'run',
+      createdAt: Date.now(),
+    },
+  });
+  await syncProfile(deps);
+  assert.equal(updatedPayloads.length, 1);
+  assert.equal(isValidAvatarConfig(updatedPayloads[0].avatar_config), true);
+  assert.deepEqual(updatedPayloads[0].avatar_config, avatarFromCharacter('teo'));
+
+  // 5b. pullCloudToLocal com avatar_config: {} deixa profile.avatar === undefined e resolveAvatar funciona
+  remoteAvatarConfig = {};
+  await pullCloudToLocal(deps, { mode: 'replace' });
+  const profEmpty = useGame.getState().profile;
+  assert.ok(profEmpty);
+  assert.equal(profEmpty.avatar, undefined, 'avatar_config: {} deve virar undefined');
+  const resolvedEmpty = resolveAvatar(profEmpty);
+  assert.deepEqual(resolvedEmpty, avatarFromCharacter('teo'));
+  assert.ok(avatarKey(resolvedEmpty).length > 0);
+  assert.equal(avatarFrame(resolvedEmpty, 'bike', 'down', 0).w, 24);
+
+  // 5c. pullCloudToLocal com avatar_config malformado também faz fallback seguro
+  for (const bad of [
+    null,
+    { hair: 'moicano', colors: avatarFromCharacter('lia').colors },
+    { hair: 'short', colors: { skin: '#f6cfae' } },
+    { hair: 'short', colors: { ...avatarFromCharacter('lia').colors, bike: 123 } },
+  ]) {
+    remoteAvatarConfig = bad;
+    await pullCloudToLocal(deps, { mode: 'replace' });
+    const p = useGame.getState().profile;
+    assert.ok(p);
+    assert.equal(p.avatar, undefined, `avatar_config malformado deve virar undefined: ${JSON.stringify(bad)}`);
+    assert.ok(avatarKey(resolveAvatar(p)).length > 0);
+  }
+
+  // 5d. pullCloudToLocal com avatar_config válido preserva o avatar customizado
+  const validCustom = avatarFromCharacter('dandara');
+  remoteAvatarConfig = validCustom;
+  await pullCloudToLocal(deps, { mode: 'replace' });
+  assert.deepEqual(useGame.getState().profile?.avatar, validCustom);
+
+  fog.clear();
+  useGame.getState().resetProgress();
+});
+
+test('6. Integração ao vivo no Supabase (lugwebngeyadfrqoapsg): syncProfile, syncActivity, syncCitiesAndCaptures, syncFog, syncAchievements, pullCloudToLocal', async (t) => {
   assert.ok(SUPABASE_URL && SUPABASE_KEY, 'EXPO_PUBLIC_SUPABASE_URL e EXPO_PUBLIC_SUPABASE_ANON_KEY necessárias');
 
   let adminClient: SupabaseClient | null = null;

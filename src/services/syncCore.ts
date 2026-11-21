@@ -19,6 +19,11 @@ import type {
   Rarity,
   VerificationStatus,
 } from '../game/types.ts';
+import {
+  HAIR_STYLES,
+  avatarFromCharacter,
+  type AvatarColorKey,
+} from '../sprites/avatar.ts';
 import type { BBox } from '../game/geo.ts';
 
 export interface FogSyncState {
@@ -153,15 +158,43 @@ async function setFogSync(deps: SyncDeps, state: FogSyncState): Promise<void> {
   }
 }
 
+const VALID_HAIR_STYLES = new Set<string>(HAIR_STYLES.map((h) => h.id));
+const AVATAR_COLOR_KEYS: readonly AvatarColorKey[] = [
+  'skin',
+  'hair',
+  'top',
+  'bottom',
+  'shoe',
+  'helmet',
+  'bike',
+];
+
+export function isValidAvatarConfig(value: unknown): value is AvatarConfig {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const obj = value as { hair?: unknown; colors?: unknown };
+  if (typeof obj.hair !== 'string' || !VALID_HAIR_STYLES.has(obj.hair)) return false;
+  if (!obj.colors || typeof obj.colors !== 'object' || Array.isArray(obj.colors)) return false;
+  const colors = obj.colors as Record<string, unknown>;
+  for (const key of AVATAR_COLOR_KEYS) {
+    const color = colors[key];
+    if (typeof color !== 'string' || color.trim().length === 0) return false;
+  }
+  return true;
+}
+
 async function runProfile(deps: SyncDeps): Promise<void> {
   const s = useGame.getState();
   if (!s.profile) return;
+
+  const avatarConfig = isValidAvatarConfig(s.profile.avatar)
+    ? s.profile.avatar
+    : avatarFromCharacter(s.profile.characterId);
 
   const payload: Record<string, unknown> = {
     display_name: s.profile.name.trim().slice(0, 32) || 'Viajante',
     modality: s.profile.modality,
     character_id: s.profile.characterId.trim().slice(0, 40) || 'custom',
-    avatar_config: s.profile.avatar ?? {},
+    avatar_config: avatarConfig,
     settings: { sound: s.settings.sound, haptics: s.settings.haptics },
     updated_at: new Date().toISOString(),
   };
@@ -298,16 +331,22 @@ async function downloadAndMergeFog(deps: SyncDeps, storagePath: string): Promise
     });
 
   if (error || !blob) {
-    console.warn('[sync] falha ao baixar snapshot de névoa', error?.message);
-    return 0;
+    throw new Error(
+      `Falha ao baixar snapshot de névoa (${storagePath}): ${error?.message ?? 'resposta vazia'}`,
+    );
   }
 
   const raw = await blobToBytes(blob);
-  const plain = maybeGunzip(raw);
+  let plain: Uint8Array;
+  try {
+    plain = maybeGunzip(raw);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Falha ao descompactar snapshot de névoa (${storagePath}): ${msg}`);
+  }
   const remoteFog = decodeFog(plain);
   if (!remoteFog) {
-    console.warn('[sync] snapshot de névoa remoto inválido');
-    return 0;
+    throw new Error(`Snapshot de névoa remoto inválido (${storagePath})`);
   }
 
   const added = fog.merge(remoteFog);
@@ -724,7 +763,7 @@ async function runPullCloudToLocal(
     display_name: string;
     modality: Modality;
     character_id: string;
-    avatar_config: AvatarConfig;
+    avatar_config: unknown;
     xp: number;
     level: number;
     wallet: number;
@@ -753,18 +792,25 @@ async function runPullCloudToLocal(
       .download(fogState.storage_path, {
         cacheNonce: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       });
-    if (!dlErr && blob) {
-      const raw = await blobToBytes(blob);
-      const remoteFog = decodeFog(maybeGunzip(raw));
-      if (remoteFog) {
-        if (mode === 'replace') fog.load(remoteFog);
-        else fog.merge(remoteFog);
-      } else if (mode === 'replace') {
-        fog.clear();
-      }
-    } else if (mode === 'replace') {
-      fog.clear();
+    if (dlErr || !blob) {
+      throw new Error(
+        `Falha ao baixar snapshot de névoa (${fogState.storage_path}): ${dlErr?.message ?? 'resposta vazia'}`,
+      );
     }
+    const raw = await blobToBytes(blob);
+    let plain: Uint8Array;
+    try {
+      plain = maybeGunzip(raw);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`Falha ao descompactar snapshot de névoa (${fogState.storage_path}): ${msg}`);
+    }
+    const remoteFog = decodeFog(plain);
+    if (!remoteFog) {
+      throw new Error(`Snapshot de névoa remoto inválido (${fogState.storage_path})`);
+    }
+    if (mode === 'replace') fog.load(remoteFog);
+    else fog.merge(remoteFog);
   } else if (mode === 'replace') {
     fog.clear();
   }
@@ -775,10 +821,11 @@ async function runPullCloudToLocal(
     lastSyncedAt: now,
   });
 
+  const validAvatar = isValidAvatarConfig(prof.avatar_config) ? prof.avatar_config : undefined;
   const remoteProfile: Profile = {
     name: prof.display_name,
     characterId: prof.character_id,
-    avatar: prof.avatar_config,
+    ...(validAvatar ? { avatar: validAvatar } : {}),
     modality: prof.modality,
     createdAt: Date.parse(prof.created_at) || now,
     ...(prof.username ? { username: prof.username } : {}),
