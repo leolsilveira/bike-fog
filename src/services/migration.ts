@@ -1,6 +1,8 @@
 // Orquestração da migração local ↔ nuvem após autenticação.
-import { wipeAll } from '../game/persist.ts';
-import { useGame } from '../game/store.ts';
+import { recountCities } from '../game/cities.ts';
+import { fog } from '../game/fog.ts';
+import { getFogSyncState, saveNow, setFogSyncState, wipeAll } from '../game/persist.ts';
+import { useGame, type PersistedState } from '../game/store.ts';
 import {
   buildLocalMigrationSummary,
   decideMigration,
@@ -8,8 +10,8 @@ import {
   inspectCloudState,
   type MigrationDecision,
 } from './migrationCore.ts';
-import { requireSupabase } from './supabase.ts';
-import { pullCloudToLocal, pushAllLocalToCloud } from './sync.ts';
+import { getSupabaseUser, requireSupabase } from './supabase.ts';
+import { pullCloudToLocal, pushAllLocalToCloud, withCloudGuard } from './sync.ts';
 
 export {
   buildLocalMigrationSummary,
@@ -125,9 +127,50 @@ export async function resolveMigrationMerge(): Promise<void> {
 }
 
 export async function resolveMigrationCloudOnly(): Promise<void> {
-  await wipeAll();
-  useGame.getState().resetProgress();
+  requireSupabase();
+  const user = await getSupabaseUser();
+  if (!user) {
+    throw new Error('Entre na sua conta antes de continuar.');
+  }
+
+  // Baixa e valida tudo da nuvem antes de apagar os dados locais, evitando perda ou fechamento precoce se falhar.
   await pullCloudToLocal({ mode: 'replace' });
-  useGame.getState().setPendingMigration(null);
+
+  const cloudFog = fog.serialize();
+  const fogSync = await getFogSyncState();
+  const pulled = useGame.getState();
+  const cloudLastSyncedAt = pulled.lastSyncedAt ?? Date.now();
+  const cloudSnapshot: Partial<PersistedState> = {
+    profile: pulled.profile,
+    xp: pulled.xp,
+    wallet: pulled.wallet,
+    totals: pulled.totals,
+    cities: pulled.cities,
+    captures: pulled.captures,
+    activities: pulled.activities,
+    achievements: pulled.achievements,
+    settings: pulled.settings,
+    ...(pulled.cloudUserId !== undefined ? { cloudUserId: pulled.cloudUserId } : {}),
+    ...(pulled.cloudSyncedAt !== undefined ? { cloudSyncedAt: pulled.cloudSyncedAt } : {}),
+  };
+
+  await withCloudGuard(async () => {
+    await wipeAll();
+    useGame.getState().resetProgress();
+    if (cloudFog.keys.length > 0) {
+      fog.load(cloudFog);
+    }
+    await setFogSyncState(fogSync);
+    useGame.getState().applyCloudSnapshot(cloudSnapshot);
+    useGame.setState({ lastSyncedAt: cloudLastSyncedAt, lastSyncError: null });
+    recountCities();
+    await saveNow();
+  });
+
   recentResolution = null;
+  const s = useGame.getState();
+  s.setPendingMigration(null);
+  if (s.modals[0]?.type === 'migration') {
+    s.closeModal();
+  }
 }

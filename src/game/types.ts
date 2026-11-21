@@ -152,7 +152,7 @@ export interface RouteProgress {
 }
 
 /** Abas da barra. Gravar não é aba: o botão do meio abre a folha "Nova atividade" (ver store `planning`). */
-export type Tab = 'map' | 'stats';
+export type Tab = 'map' | 'social' | 'stats';
 
 export interface PlayerFix extends LngLat {
   accuracy: number;
@@ -219,4 +219,5 @@ export type Modal =
   | { type: 'summary'; activity: ActivitySummary }
   | { type: 'avatar' }
   | { type: 'auth' }
-  | { type: 'migration' };
+  | { type: 'migration' }
+  | { type: 'friend_profile'; userId: string; friendshipId?: string };

@@ -1,6 +1,6 @@
 // Casca do app: fontes + hidratação (com o splash nativo segurado), fluxo Título → Criação → Jogo,
 // mapa em tela cheia por trás e HUD/telas/modais por cima (port de legacy/src/App.tsx).
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Platform, StyleSheet, View, type ViewStyle } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -16,6 +16,7 @@ import { TitleScreen } from './src/ui/screens/TitleScreen.tsx';
 import { CreateScreen } from './src/ui/screens/CreateScreen.tsx';
 import { MapTab } from './src/ui/screens/MapTab.tsx';
 import { RideScreen } from './src/ui/screens/RideScreen.tsx';
+import { SocialScreen } from './src/ui/screens/SocialScreen.tsx';
 import { StatsScreen } from './src/ui/screens/StatsScreen.tsx';
 import { PoiCard, SimPad, SpeedBanner, TabBar, Toasts } from './src/ui/components/Hud.tsx';
 import { ModalHost } from './src/ui/components/Modals.tsx';
@@ -48,8 +49,33 @@ function Layer({ z, children }: { z: number; children: ReactNode }) {
  */
 function Game() {
   const tab = useGame((s) => s.tab);
+  const setTab = useGame((s) => s.setTab);
+  const hydrated = useGame((s) => s.hydrated);
+  const authUserId = useGame((s) => s.authUserId);
+  const pendingInviteUsername = useGame((s) => s.pendingInviteUsername);
+  const pendingMigration = useGame((s) => s.pendingMigration);
   const live = useGame((s) => s.live != null);
   const planning = useGame((s) => s.planning);
+  const routedInviteRef = useRef<string | null>(null);
+
+  // Leva automaticamente à aba Social uma vez quando houver convite pendente e conta conectada.
+  useEffect(() => {
+    if (!pendingInviteUsername) {
+      routedInviteRef.current = null;
+      return;
+    }
+    if (
+      hydrated &&
+      authUserId &&
+      !live &&
+      !pendingMigration &&
+      routedInviteRef.current !== pendingInviteUsername
+    ) {
+      routedInviteRef.current = pendingInviteUsername;
+      setTab('social');
+    }
+  }, [hydrated, authUserId, pendingInviteUsername, pendingMigration, live, setTab]);
+
   // tela acesa gravando, em qualquer aba
   useKeepAwakeWhile(useGame((s) => s.live?.status === 'recording'));
   return (
@@ -60,6 +86,11 @@ function Game() {
           {live ? <RideScreen /> : <MapTab hideNearby={planning} />}
         </Layer>
       )}
+      {tab === 'social' && (
+        <Layer z={15}>
+          <SocialScreen />
+        </Layer>
+      )}
       {tab === 'stats' && (
         <Layer z={15}>
           <StatsScreen />
@@ -67,7 +98,7 @@ function Game() {
       )}
       <SpeedBanner />
       <SimPad />
-      {tab !== 'stats' && <PoiCard />}
+      {tab === 'map' && <PoiCard />}
       {planning && <StartSheet />}
       <TabBar />
     </View>

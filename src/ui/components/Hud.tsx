@@ -71,9 +71,10 @@ function toastInStyle(v: Animated.Value) {
 // Barra de abas
 // ---------------------------------------------------------------------------
 
-/** Itens da barra: duas abas nas pontas e, no meio, a ação de gravar (não é aba). */
-const ITEMS: ({ id: Tab; label: string; icon: 'pin' | 'stats' } | { id: 'record' })[] = [
+/** Itens da barra: Mapa, Social, botão central de gravar (não é aba) e Stats. */
+const ITEMS: ({ id: Tab; label: string; icon: 'pin' | 'trophy' | 'stats' } | { id: 'record' })[] = [
   { id: 'map', label: 'Mapa', icon: 'pin' },
+  { id: 'social', label: 'Social', icon: 'trophy' },
   { id: 'record' },
   { id: 'stats', label: 'Stats', icon: 'stats' },
 ];
@@ -128,7 +129,7 @@ export function TabBar() {
                     <Icon name={icon} size={30} color={C.cream} accent={C.cream} />
                   </View>
                 </View>
-                <Txt size={13} weight={700} spacing={0.04} upper color={color} numberOfLines={1}>
+                <Txt size={12} weight={700} spacing={0.02} upper color={color} numberOfLines={1}>
                   {label}
                 </Txt>
               </Pressable>
@@ -155,7 +156,7 @@ export function TabBar() {
                 {active && <Icon name={t.icon} size={30} color={C.ink} accent={C.ink} style={styles.iconShadow} />}
                 <Icon name={t.icon} size={30} color={color} accent={active ? C.cream : C.iconMuted} />
               </View>
-              <Txt size={13} weight={700} spacing={0.04} upper color={color} numberOfLines={1}>
+              <Txt size={12} weight={700} spacing={0.02} upper color={color} numberOfLines={1}>
                 {t.label}
               </Txt>
             </Pressable>
@@ -399,7 +400,7 @@ export function SimPad() {
   // Solta o joystick se o pad sumir no meio do gesto.
   useEffect(() => () => setSimInput(0, 0), []);
 
-  if (!sim || tab === 'stats') return null;
+  if (!sim || tab !== 'map') return null;
 
   const update = (e: GestureResponderEvent) => {
     let dx = e.nativeEvent.pageX - origin.current.x;
@@ -522,7 +523,7 @@ const styles = StyleSheet.create({
     right: 12,
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: 10,
+    gap: 6,
   },
   tab: { alignItems: 'center', gap: 4, paddingTop: 6, paddingBottom: 4, flexBasis: 0 },
   tabSide: { flexGrow: 1 },

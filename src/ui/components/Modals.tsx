@@ -22,6 +22,7 @@ import { POI_INFO, RARITY_INFO } from '../../sprites/items.ts';
 import type { AchievementCategory, AchievementUnlockEvent, ActivitySummary, Capture } from '../../game/types.ts';
 import { AvatarCustomizer } from './AvatarCustomizer.tsx';
 import { AuthModal } from './AuthModal.tsx';
+import { FriendProfileModal } from './FriendProfileModal.tsx';
 import { MigrationModal } from './MigrationModal.tsx';
 import { BadgeImg, CharacterSprite, CoinImg, Icon } from './Sprites.tsx';
 import { Arcade, Bar, Chip, Muted, PxBox, PxButton, PxCell, Txt } from './Px.tsx';
@@ -672,6 +673,15 @@ export function ModalHost() {
         {modal.type === 'migration' && (
           <ModalCard testID="migration-modal">
             <MigrationModal onClose={close} />
+          </ModalCard>
+        )}
+        {modal.type === 'friend_profile' && (
+          <ModalCard testID="friend-summary-modal">
+            <FriendProfileModal
+              userId={modal.userId}
+              friendshipId={modal.friendshipId}
+              onClose={close}
+            />
           </ModalCard>
         )}
       </Backdrop>

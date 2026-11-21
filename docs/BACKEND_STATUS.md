@@ -1,6 +1,6 @@
 # Estado do Backend e Integração — Desbrava
 
-**Última atualização:** 2026-11-21 (fechamento do marco **M3 — `auth-migration-ui`** na branch `react-native`)
+**Última atualização:** 2026-11-21 (fechamento do marco **M4 — `friends-ranking-ui`** na branch `react-native`)
 
 Este documento acompanha o que já está implantado no Supabase, o que já existe no código do aplicativo Expo/React Native, o que foi adiado no escopo atual e como rodar/testar o projeto localmente ou no dispositivo.
 
@@ -80,8 +80,12 @@ Este documento acompanha o que já está implantado no Supabase, o que já exist
   - Deep links de convite (`src/services/deepLinkCore.ts`, `src/services/deepLink.ts`): captura `desbrava://add/<username>`, URLs web `/add/<username>` e `?add=<username>` em `pendingInviteUsername` via `App.tsx`, preservando `?skip`, `?sim=1`, `?debug` e `?gallery`.
   - Telas e modais: `AuthModal.tsx`, `MigrationModal.tsx`, `Modals.tsx`, `TitleScreen.tsx` (Modo Convidado instantâneo + botão entrar/badge da conta), `CreateScreen.tsx` (`@username` opcional com sugestão automática) e `StatsScreen.tsx` (cartão **Conta e Sincronização** com `@username`, toggle `Perfil público`, sincronização manual e logout limpo).
   - Verificação: `scripts/verify-auth-migration.ts`, `scripts/verify-sync-core.ts`, `scripts/test-achievements.ts`, `npm run typecheck`, `npm run lint`, `npm run build:web` e smoke check no Chrome headless contra `dist/`.
-- **Próximos marcos em andamento:**
-  - **M4 (`friends-ranking-ui`):** tela e fluxos de Amigos & Ranking (`SocialScreen.tsx`, `src/services/social.ts`, busca `search_users`, solicitações/bloqueio, resumo do amigo, Ranking de Amigos e Ranking Global).
+- **Concluído — M4 (`friends-ranking-ui`):**
+  - Serviços sociais (`src/services/socialCore.ts`, `src/services/social.ts`): busca pública (`search_users`), perfis públicos (`get_public_profile`, `get_public_profile_by_username`), ciclo de vida completo de amizades (`pending`/`accepted`/`blocked`, auto-aceite em convite cruzado, bloqueio via `blocked_by`, desbloqueio/recusa/cancelamento/remoção via `DELETE`), rankings de Amigos (`get_friends_leaderboard`) e Global (`get_global_leaderboard` com paginação e `my_rank` fixado) em XP, Distância e Células (Geral e Mensal), além de compartilhamento de link de convite (`desbrava://add/<username>` / `?add=<username>`).
+  - Telas, modais e navegação (`SocialScreen.tsx`, `FriendProfileModal.tsx`, `Hud.tsx`, `Modals.tsx`, `App.tsx`, `src/game/types.ts`, `src/game/store.ts`): nova aba **Social** na `TabBar`, estado de Convidado com CTA de login, banner de convite pendente por deep link (`pendingInviteUsername`), busca por `@username`/nome, solicitações recebidas/enviadas, lista de amigos/bloqueados, modal de resumo público do explorador (sem expor trilhas, atividades, carteira ou ajustes) e filtros completos de ranking.
+  - Polimento M3 (`src/services/migration.ts`): `resolveMigrationCloudOnly()` agora conclui `pullCloudToLocal({ mode: 'replace' })` antes de limpar dados locais e fechar o `MigrationModal`, preservando o estado local e exibindo erros de rede caso a nuvem falhe.
+  - Verificação: `scripts/verify-social.ts`, `scripts/test-achievements.ts`, `npm run typecheck`, `npm run lint`, `npm run build:web` e smoke check no Chrome headless contra `dist/`.
+- **Próximo marco em andamento:**
   - **M5 (`store-cosmetics-ui`):** tela da Loja (`ShopScreen.tsx`, `src/services/storeService.ts`), compra atômica (`purchase_store_item`), inventário/cosméticos em pixel art (`src/sprites/*` + `map-runtime/*`) e ativação online de boosters (`user_boost_usages`).
 
 ---

@@ -63,6 +63,8 @@ interface RuntimeState {
   speedWarning: boolean;
   /** Muda quando o registro de POIs muda (para listas "por perto"). */
   poiRev: number;
+  /** Muda após ações sociais (convites, amizades, bloqueios) para atualizar listas e rankings. */
+  socialRev: number;
   /** Cidade em que o jogador está agora. */
   currentCityId: string | null;
   /** POI tocado no mapa (cartão de detalhes). */
@@ -119,6 +121,7 @@ interface Actions {
   setAuthState(patch: Partial<{ authUserId: string | null; authEmail: string | null; authLoading: boolean }>): void;
   setPendingInviteUsername(username: string | null): void;
   setPendingMigration(migration: PendingMigration | null): void;
+  bumpSocialRev(): void;
   updateProfileIdentity(patch: Partial<Pick<Profile, 'name' | 'username' | 'isPublic'>>): void;
   reconcileVerifiedActivity(payload: VerifiedActivityReconciliation): void;
   applyCloudSnapshot(snapshot: Partial<PersistedState>): void;
@@ -174,6 +177,7 @@ export const useGame = create<GameState>()((set, get) => ({
   modals: [],
   speedWarning: false,
   poiRev: 0,
+  socialRev: 0,
   currentCityId: null,
   selected: null,
   planning: false,
@@ -418,6 +422,9 @@ export const useGame = create<GameState>()((set, get) => ({
   },
   setPendingMigration(migration) {
     set({ pendingMigration: migration });
+  },
+  bumpSocialRev() {
+    set({ socialRev: get().socialRev + 1 });
   },
   updateProfileIdentity(patch) {
     const p = get().profile;
