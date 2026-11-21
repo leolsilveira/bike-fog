@@ -1,6 +1,6 @@
 # Estado do Backend e Integração — Desbrava
 
-**Última atualização:** 2026-11-21 (fechamento do marco **M1 — `design-backend`** na branch `react-native`)
+**Última atualização:** 2026-11-21 (fechamento do marco **M2 — `supabase-sync-core`** na branch `react-native`)
 
 Este documento acompanha o que já está implantado no Supabase, o que já existe no código do aplicativo Expo/React Native, o que foi adiado no escopo atual e como rodar/testar o projeto localmente ou no dispositivo.
 
@@ -68,8 +68,13 @@ Este documento acompanha o que já está implantado no Supabase, o que já exist
   - Migrações `0001`–`0009` e Edge Function `verify-activity` versionadas em `supabase/` e implantadas no projeto `lugwebngeyadfrqoapsg`.
   - Dependências Expo SDK 57 instaladas em `package.json`: `@supabase/supabase-js`, `expo-secure-store`, `expo-crypto` e `expo-linking` (com plugin `expo-secure-store` configurado em `app.json`).
   - Template de variáveis de ambiente em `.env.example` e script de verificação de backend em `scripts/verify-supabase-backend.ts`.
+- **Concluído — M2 (`supabase-sync-core`):**
+  - Armazenamento seguro de sessão: `src/services/sessionStorage.ts` (`LargeSecureStore` nativo com `expo-crypto` AES-256-GCM + `expo-secure-store` `AFTER_FIRST_UNLOCK` + `Documents/desbrava-auth` isolado de `wipeAll()`) e `src/services/sessionStorage.web.ts` (`window.localStorage` com fallback em memória).
+  - Cliente Supabase singleton: `src/services/supabase.ts` (`isSupabaseConfigured()`, `requireSupabase()`, `getSupabaseSession()`, `getSupabaseUser()`, lifecycle de `autoRefreshToken` no `AppState` nativo e boot seguro no Modo Convidado quando sem env).
+  - Motor de sincronização bidirecional: `src/services/syncCore.ts` (puro/testável no Node) e `src/services/sync.ts` (hooks no app): `syncProfile`, `syncActivity` (trilha `.bin.gz` via `activity-tracks` + Edge Function `verify-activity` + reconciliação autoritativa), `syncFog` (snapshot `DSBF` gzipado em `fog-snapshots` com `cacheControl: '0'`/`cacheNonce` + `upsert_fog_state` e retry com `fog.merge` em conflitos), `syncCitiesAndCaptures` (preservando `user_captures.is_verified = true`), `syncAchievements` (`claim_achievement`), `pushAllLocalToCloud`, `pullCloudToLocal` e auto-sync não-bloqueante ao hidratar, finalizar atividade ao vivo, importar GPX, editar perfil/configurações ou desbloquear conquistas.
+  - Adaptações no estado e matemática do jogo: guarda polar em `src/game/geo.ts` (`|lat| <= 85.05112878`, `r <= 1024`), `fog.merge()` com remapeamento de `cityIds` em `src/game/fog.ts`, rastreio de `coinsByKind` e ações de reconciliação (`setSyncState`, `reconcileVerifiedActivity`, `applyCloudSnapshot`) em `src/game/store.ts` e `src/game/types.ts`, estado `fog:sync` e boot hook em `src/game/persist.ts` e auto-sync após importação GPX em `src/game/activitiesTransfer.ts`.
+  - Verificação: `scripts/verify-sync-core.ts` (testes unitários + integração ao vivo contra `lugwebngeyadfrqoapsg`), `scripts/test-achievements.ts`, `npm run typecheck`, `npm run lint` e `npm run build:web` passando.
 - **Próximos marcos em andamento:**
-  - **M2 (`supabase-sync-core`):** cliente Supabase (`src/services/supabase.ts`), armazenamento seguro de sessão (`src/services/sessionStorage*`), guarda polar em `src/game/geo.ts` e sincronização bidirecional completa (`src/services/sync.ts`: perfil, XP/nível, carteira, totais, atividades + trilhas via `verify-activity`, névoa `fog:v2` + `fog-snapshots`, cidades, capturas e conquistas).
   - **M3 (`auth-migration-ui`):** Login/Cadastro por Email e Senha, Modo Convidado, persistência de sessão, criação/edição de `@username` e privacidade, migração local → nuvem (`TitleScreen`, `CreateScreen`, `StatsScreen`, `AuthModal`, `MigrationModal`) e deep links `desbrava://add/<username>`.
   - **M4 (`friends-ranking-ui`):** tela e fluxos de Amigos & Ranking (`SocialScreen.tsx`, `src/services/social.ts`, busca `search_users`, solicitações/bloqueio, resumo do amigo, Ranking de Amigos e Ranking Global).
   - **M5 (`store-cosmetics-ui`):** tela da Loja (`ShopScreen.tsx`, `src/services/storeService.ts`), compra atômica (`purchase_store_item`), inventário/cosméticos em pixel art (`src/sprites/*` + `map-runtime/*`) e ativação online de boosters (`user_boost_usages`).

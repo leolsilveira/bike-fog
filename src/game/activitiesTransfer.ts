@@ -2,6 +2,7 @@
 // Atividades importadas revelam a névoa no mapa e entram no histórico/totais, mas NÃO dão XP/nível.
 import { strToU8, zipSync } from 'fflate';
 import { pickActivityFile, shareZip } from '../services/fileTransfer';
+import { syncAfterGpxImport } from '../services/sync.ts';
 import { checkAndGrantAchievements } from './achievements.ts';
 import { bumpCityCells, cityAtSync, ensureCityAt } from './cities.ts';
 import { GAME_NAME, REVEAL_RADIUS_M } from './config.ts';
@@ -176,6 +177,9 @@ export async function importActivitiesFromFile(opts?: {
           newCells: activityCells,
           xp: 0,
           cityIds: [...activityCitySet],
+          source: 'gpx_import',
+          verificationStatus: 'local',
+          verificationReason: null,
         });
 
         const n = newSummaries.length;
@@ -236,6 +240,7 @@ export async function importActivitiesFromFile(opts?: {
   checkAndGrantAchievements({ batchToast: true });
 
   await saveNow();
+  void syncAfterGpxImport(newSummaries);
   onProgress?.({ percent: 100, label: 'Concluído!' });
 
   const firstPt = samplePt as LngLat | null;

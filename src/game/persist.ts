@@ -8,9 +8,16 @@ import { bytesToFloat64, decodeFog, encodeFog, float64ToBytes, type FogData } fr
 const SAVE_KEY = 'save:v1';
 /** Névoa em binário (ver binary.ts). */
 const FOG_KEY = 'fog:v2';
+/** Metadados de sincronização da névoa (revisão otimista no Supabase). */
+export const FOG_SYNC_KEY = 'fog:sync';
 /** Formato da versão web antiga (objeto com typed arrays no IndexedDB). Só é lido para migrar. */
 const LEGACY_CELLS_KEY = 'cells:v1';
 const TRACK_PREFIX = 'track:';
+
+export interface FogSyncState {
+  revision: number;
+  lastSyncedAt: number | null;
+}
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let cellsDirty = false;
@@ -56,6 +63,9 @@ export async function hydrate(keepRecording = false): Promise<void> {
   }
   hydrated = true;
   useGame.setState({ hydrated: true });
+  void import('../services/sync.ts')
+    .then(({ initOnlineSync }) => initOnlineSync())
+    .catch((err) => console.warn('[persist] falha ao iniciar sincronização online', err));
 }
 
 async function writeOnce(): Promise<void> {
@@ -115,7 +125,8 @@ export function startAutosave(onBackground?: () => void): void {
       s.profile !== prev.profile || s.wallet !== prev.wallet || s.xp !== prev.xp || s.totals !== prev.totals ||
       s.captures !== prev.captures || s.cities !== prev.cities || s.activities !== prev.activities ||
       s.achievements !== prev.achievements || s.settings !== prev.settings || s.coins !== prev.coins ||
-      s.live !== prev.live || s.unlocked !== prev.unlocked || s.route !== prev.route
+      s.live !== prev.live || s.unlocked !== prev.unlocked || s.route !== prev.route ||
+      s.cloudUserId !== prev.cloudUserId || s.cloudSyncedAt !== prev.cloudSyncedAt
     ) {
       scheduleSave();
     }
@@ -165,6 +176,21 @@ export async function getKv<T>(key: string): Promise<T | undefined> {
 
 export async function setKv(key: string, value: unknown): Promise<void> {
   await storage.setJson(key, value);
+}
+
+export async function getFogSyncState(): Promise<FogSyncState> {
+  const v = await getKv<FogSyncState>(FOG_SYNC_KEY);
+  if (v && typeof v.revision === 'number' && Number.isFinite(v.revision) && v.revision >= 0) {
+    return {
+      revision: v.revision,
+      lastSyncedAt: typeof v.lastSyncedAt === 'number' && Number.isFinite(v.lastSyncedAt) ? v.lastSyncedAt : null,
+    };
+  }
+  return { revision: 0, lastSyncedAt: null };
+}
+
+export async function setFogSyncState(state: FogSyncState): Promise<void> {
+  await setKv(FOG_SYNC_KEY, state);
 }
 
 export async function wipeAll(): Promise<void> {

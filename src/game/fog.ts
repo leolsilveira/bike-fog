@@ -1,4 +1,5 @@
 // Células exploradas. Fica fora do zustand porque pode ter dezenas de milhares de itens.
+import type { FogData } from './binary.ts';
 import { cellsInRadius, cellCenter, haversine, lerpLngLat, type LngLat } from './geo.ts';
 
 type Listener = (added: number[], reset: boolean) => void;
@@ -131,7 +132,7 @@ export const fog = {
     return { keys, city, cityIds: [...cityIds] };
   },
 
-  load(data: { keys: Float64Array; city: Uint16Array; cityIds: string[] } | undefined): void {
+  load(data: FogData | undefined): void {
     cells.clear();
     cityIds.length = 1;
     if (data) {
@@ -139,6 +140,27 @@ export const fog = {
       for (let i = 0; i < data.keys.length; i++) cells.set(data.keys[i], data.city[i] ?? 0);
     }
     listeners.forEach((fn) => fn([...cells.keys()], true));
+  },
+
+  /** Mescla células recebidas da nuvem (união de conjuntos), remapeando índices de cidades por ID. */
+  merge(incoming: FogData | undefined): number {
+    if (!incoming || incoming.keys.length === 0) return 0;
+    const remap: number[] = incoming.cityIds.map((id, idx) => (idx === 0 || !id ? 0 : cityIndex(id)));
+    const added: number[] = [];
+    for (let i = 0; i < incoming.keys.length; i++) {
+      const key = incoming.keys[i];
+      const rawCityIdx = incoming.city[i] ?? 0;
+      const mappedIdx = remap[rawCityIdx] ?? 0;
+      const existing = cells.get(key);
+      if (existing === undefined) {
+        cells.set(key, mappedIdx);
+        added.push(key);
+      } else if (existing === 0 && mappedIdx > 0) {
+        cells.set(key, mappedIdx);
+      }
+    }
+    if (added.length > 0) listeners.forEach((fn) => fn(added, false));
+    return added.length;
   },
 
   clear(): void {

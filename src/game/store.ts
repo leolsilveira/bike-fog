@@ -5,8 +5,9 @@ import { COIN_VALUE, RARITY_INFO } from '../sprites/items.ts';
 import { levelFromXp } from './progression.ts';
 import { XP } from './config.ts';
 import type {
-  AchievementRecord, AchievementUnlockEvent, ActivitySummary, AvatarConfig, Capture, City, Coin, GpsStatus,
-  LiveActivity, Modal, Modality, PlannedRoute, PlayerFix, Poi, Profile, RouteProgress, Settings, Tab, Toast, Totals,
+  AchievementRecord, AchievementUnlockEvent, ActivitySummary, AvatarConfig, Capture, City, Coin, CoinsByKind,
+  GpsStatus, LiveActivity, Modal, Modality, PlannedRoute, PlayerFix, Poi, Profile, RouteProgress, Settings, Tab, Toast,
+  Totals,
 } from './types.ts';
 
 export interface PersistedState {
@@ -25,6 +26,31 @@ export interface PersistedState {
   live: LiveActivity | null;
   /** Rota planejada (salva junto: sobrevive ao app fechar no meio da atividade). */
   route: PlannedRoute | null;
+  cloudUserId?: string;
+  cloudSyncedAt?: number;
+}
+
+export interface VerifiedActivityReconciliation {
+  activityId: string;
+  verificationStatus: 'verified' | 'flagged';
+  verificationReason?: string | null;
+  distanceM?: number;
+  movingS?: number;
+  maxSpeed?: number;
+  xpEarned?: number;
+  coinsEarned?: number;
+  newCells?: number;
+  authoritative: {
+    xp: number;
+    level: number;
+    wallet: number;
+    totalDistanceM: number;
+    totalMovingS: number;
+    totalActivities: number;
+    totalCells: number;
+    totalCaptures: number;
+    achievementsCount: number;
+  };
 }
 
 interface RuntimeState {
@@ -47,6 +73,10 @@ interface RuntimeState {
   routeProgress: RouteProgress | null;
   /** Recálculo automático da rota (fora do trajeto): em andamento ou falhou na última tentativa. */
   rerouting: 'idle' | 'busy' | 'failed';
+  /** Estado de sincronização online com o Supabase (não persistido em save:v1). */
+  syncing: boolean;
+  lastSyncError: string | null;
+  lastSyncedAt: number | null;
 }
 
 interface Actions {
@@ -73,11 +103,18 @@ interface Actions {
   collectCoin(coin: Coin): void;
   capturePoi(poi: Poi, cityId: string | null): Capture | null;
   grantAchievements(unlocks: AchievementUnlockEvent[], opts?: { batchToast?: boolean }): number;
+  setSyncState(patch: Partial<{ syncing: boolean; lastSyncError: string | null; lastSyncedAt: number | null }>): void;
+  reconcileVerifiedActivity(payload: VerifiedActivityReconciliation): void;
+  applyCloudSnapshot(snapshot: Partial<PersistedState>): void;
   resetProgress(): void;
   select(poi: Poi | null): void;
 }
 
 export type GameState = PersistedState & RuntimeState & Actions;
+
+export const EMPTY_COINS_BY_KIND: CoinsByKind = {
+  bronze: 0, silver: 0, gold: 0, gem: 0,
+};
 
 export const EMPTY_TOTALS: Totals = {
   distanceM: 0, movingS: 0, activities: 0, coinsValue: 0, coinsCount: 0, captures: 0, cells: 0,
@@ -126,6 +163,9 @@ export const useGame = create<GameState>()((set, get) => ({
   planning: false,
   routeProgress: null,
   rerouting: 'idle',
+  syncing: false,
+  lastSyncError: null,
+  lastSyncedAt: null,
 
   createProfile(name, avatar, modality, characterId = 'custom') {
     set({
@@ -212,10 +252,13 @@ export const useGame = create<GameState>()((set, get) => ({
       maxSpeed: 0,
       coinsValue: 0,
       coinsCount: 0,
+      coinsByKind: { ...EMPTY_COINS_BY_KIND },
       captures: [],
       newCells: 0,
       xp: 0,
       cityIds: [],
+      source: 'live',
+      verificationStatus: 'local',
       spawnCenters: [],
       spawns: 0,
     };
@@ -247,10 +290,15 @@ export const useGame = create<GameState>()((set, get) => ({
       maxSpeed: live.maxSpeed,
       coinsValue: live.coinsValue,
       coinsCount: live.coinsCount,
+      coinsByKind: live.coinsByKind ? { ...live.coinsByKind } : { ...EMPTY_COINS_BY_KIND },
       captures: live.captures,
       newCells: live.newCells,
       xp: live.xp,
       cityIds: live.cityIds,
+      source: live.source ?? 'live',
+      verificationStatus: 'local',
+      verificationReason: null,
+      ...(live.boostUsageIds?.length ? { boostUsageIds: [...live.boostUsageIds] } : {}),
     };
     const t = s.totals;
     set({
@@ -275,11 +323,19 @@ export const useGame = create<GameState>()((set, get) => ({
   collectCoin(coin) {
     const s = get();
     const value = COIN_VALUE[coin.kind];
+    const prevKinds = s.live?.coinsByKind ?? EMPTY_COINS_BY_KIND;
     set({
       coins: s.coins.filter((c) => c.id !== coin.id),
       wallet: s.wallet + value,
       totals: { ...s.totals, coinsValue: s.totals.coinsValue + value, coinsCount: s.totals.coinsCount + 1 },
-      live: s.live ? { ...s.live, coinsValue: s.live.coinsValue + value, coinsCount: s.live.coinsCount + 1 } : null,
+      live: s.live
+        ? {
+            ...s.live,
+            coinsValue: s.live.coinsValue + value,
+            coinsCount: s.live.coinsCount + 1,
+            coinsByKind: { ...prevKinds, [coin.kind]: (prevKinds[coin.kind] ?? 0) + 1 },
+          }
+        : null,
     });
     get().addXp(Math.max(1, Math.ceil(value * XP.perCoinValue)));
   },
@@ -322,9 +378,73 @@ export const useGame = create<GameState>()((set, get) => ({
     }
     return totalCoins;
   },
+  setSyncState(patch) {
+    set(patch);
+  },
+  reconcileVerifiedActivity(payload) {
+    const s = get();
+    const now = Date.now();
+    const activities = s.activities.map((a) => {
+      if (a.id !== payload.activityId) return a;
+      return {
+        ...a,
+        verificationStatus: payload.verificationStatus,
+        verificationReason: payload.verificationReason ?? null,
+        distanceM: payload.distanceM ?? a.distanceM,
+        movingS: payload.movingS ?? a.movingS,
+        maxSpeed: payload.maxSpeed ?? a.maxSpeed,
+        xp: payload.xpEarned ?? a.xp,
+        coinsValue: payload.coinsEarned ?? a.coinsValue,
+        newCells: payload.newCells ?? a.newCells,
+      };
+    });
+    const auth = payload.authoritative;
+    set({
+      activities,
+      xp: auth.xp,
+      wallet: auth.wallet,
+      totals: {
+        ...s.totals,
+        distanceM: auth.totalDistanceM,
+        movingS: auth.totalMovingS,
+        activities: auth.totalActivities,
+        captures: auth.totalCaptures,
+        cells: Math.max(s.totals.cells, auth.totalCells),
+      },
+      profile: s.profile ? { ...s.profile, cloudSyncedAt: now } : null,
+      cloudSyncedAt: now,
+      lastSyncedAt: now,
+      lastSyncError: null,
+    });
+  },
+  applyCloudSnapshot(snapshot) {
+    const s = get();
+    set({
+      ...snapshot,
+      profile: snapshot.profile !== undefined ? snapshot.profile : s.profile,
+      totals: snapshot.totals ? { ...s.totals, ...snapshot.totals } : s.totals,
+      settings: snapshot.settings ? { ...s.settings, ...snapshot.settings } : s.settings,
+      captures: snapshot.captures ?? s.captures,
+      cities: snapshot.cities ?? s.cities,
+      activities: snapshot.activities ?? s.activities,
+      achievements: snapshot.achievements ?? s.achievements,
+      unlocked: snapshot.unlocked ?? s.unlocked,
+    });
+  },
   resetProgress() {
     set({
-      ...DEFAULT_PERSISTED, tab: 'map', modals: [], toasts: [], selected: null, planning: false, routeProgress: null,
+      ...DEFAULT_PERSISTED,
+      cloudUserId: undefined,
+      cloudSyncedAt: undefined,
+      syncing: false,
+      lastSyncError: null,
+      lastSyncedAt: null,
+      tab: 'map',
+      modals: [],
+      toasts: [],
+      selected: null,
+      planning: false,
+      routeProgress: null,
     });
   },
   select(poi) {
@@ -348,5 +468,7 @@ export function pickPersisted(s: GameState): PersistedState {
     coins: s.coins,
     live: s.live,
     route: s.route,
+    ...(s.cloudUserId !== undefined ? { cloudUserId: s.cloudUserId } : {}),
+    ...(s.cloudSyncedAt !== undefined ? { cloudSyncedAt: s.cloudSyncedAt } : {}),
   };
 }

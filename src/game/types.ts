@@ -12,6 +12,10 @@ export interface Profile {
   avatar?: AvatarConfig;
   modality: Modality;
   createdAt: number;
+  username?: string;
+  isPublic?: boolean;
+  cloudUserId?: string;
+  cloudSyncedAt?: number;
 }
 
 export interface Coin {
@@ -50,6 +54,16 @@ export interface City {
   discoveredAt: number;
 }
 
+export type ActivitySource = 'live' | 'gpx_import';
+export type VerificationStatus = 'local' | 'pending' | 'verified' | 'flagged';
+
+export interface CoinsByKind {
+  bronze: number;
+  silver: number;
+  gold: number;
+  gem: number;
+}
+
 export interface ActivitySummary {
   id: string;
   modality: Modality;
@@ -67,6 +81,11 @@ export interface ActivitySummary {
   newCells: number;
   xp: number;
   cityIds: string[];
+  source?: ActivitySource;
+  verificationStatus?: VerificationStatus;
+  verificationReason?: string | null;
+  coinsByKind?: CoinsByKind;
+  boostUsageIds?: string[];
 }
 
 export interface LiveActivity extends Omit<ActivitySummary, 'endedAt'> {
