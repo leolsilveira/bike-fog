@@ -408,6 +408,20 @@ const ICONS = {
     '.x...xx...x.',
     '.....xx.....',
   ],
+  shop: [
+    '...xxxxxx...',
+    '..xx....xx..',
+    '..x......x..',
+    '.xxxxxxxxxx.',
+    '.xaaaaaaaax.',
+    '.xaaaxxaaax.',
+    '.xaaxxxxaax.',
+    '.xaaaxxaaax.',
+    '.xaaaaaaaax.',
+    '.xxxxxxxxxx.',
+    '..xxxxxxxx..',
+    '............',
+  ],
 } satisfies Record<string, Art>;
 
 export type IconName = keyof typeof ICONS;

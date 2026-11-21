@@ -71,11 +71,12 @@ function toastInStyle(v: Animated.Value) {
 // Barra de abas
 // ---------------------------------------------------------------------------
 
-/** Itens da barra: Mapa, Social, botão central de gravar (não é aba) e Stats. */
-const ITEMS: ({ id: Tab; label: string; icon: 'pin' | 'trophy' | 'stats' } | { id: 'record' })[] = [
+/** Itens da barra: Mapa, Social, botão central de gravar (não é aba), Loja e Stats. */
+const ITEMS: ({ id: Tab; label: string; icon: 'pin' | 'trophy' | 'shop' | 'stats' } | { id: 'record' })[] = [
   { id: 'map', label: 'Mapa', icon: 'pin' },
   { id: 'social', label: 'Social', icon: 'trophy' },
   { id: 'record' },
+  { id: 'shop', label: 'Loja', icon: 'shop' },
   { id: 'stats', label: 'Stats', icon: 'stats' },
 ];
 

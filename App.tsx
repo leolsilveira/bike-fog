@@ -16,6 +16,7 @@ import { TitleScreen } from './src/ui/screens/TitleScreen.tsx';
 import { CreateScreen } from './src/ui/screens/CreateScreen.tsx';
 import { MapTab } from './src/ui/screens/MapTab.tsx';
 import { RideScreen } from './src/ui/screens/RideScreen.tsx';
+import { ShopScreen } from './src/ui/screens/ShopScreen.tsx';
 import { SocialScreen } from './src/ui/screens/SocialScreen.tsx';
 import { StatsScreen } from './src/ui/screens/StatsScreen.tsx';
 import { PoiCard, SimPad, SpeedBanner, TabBar, Toasts } from './src/ui/components/Hud.tsx';
@@ -89,6 +90,11 @@ function Game() {
       {tab === 'social' && (
         <Layer z={15}>
           <SocialScreen />
+        </Layer>
+      )}
+      {tab === 'shop' && (
+        <Layer z={15}>
+          <ShopScreen />
         </Layer>
       )}
       {tab === 'stats' && (

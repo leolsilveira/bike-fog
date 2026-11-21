@@ -2,7 +2,8 @@
 // Módulo puro (sem React Native / DOM) para ser compartilhado entre o app e o map-runtime.
 import {
   CHARACTERS, characterById, characterFrame,
-  type CharacterColors, type Facing, type HairStyle, type Modality,
+  type CharacterColors, type Facing, type GlassesCosmeticId, type HairStyle, type HatCosmeticId,
+  type Modality, type PetCosmeticId,
 } from './characters.ts';
 import type { Raster } from './pixel.ts';
 
@@ -10,9 +11,86 @@ export type AvatarColorKey = 'skin' | 'hair' | 'top' | 'bottom' | 'shoe' | 'helm
 export type AvatarPart = AvatarColorKey;
 export type AvatarColors = Record<AvatarColorKey, string>;
 
+export type CosmeticSlotKey = 'hat' | 'glasses' | 'bike' | 'shoe' | 'pet' | 'color';
+
+export interface AvatarCosmetics {
+  hat?: string;
+  glasses?: string;
+  bike?: string;
+  shoe?: string;
+  pet?: string;
+  color?: string;
+}
+
 export interface AvatarConfig {
   hair: HairStyle;
   colors: AvatarColors;
+  cosmetics?: AvatarCosmetics;
+}
+
+export const COSMETIC_SLOTS: readonly CosmeticSlotKey[] = ['hat', 'glasses', 'bike', 'shoe', 'pet', 'color'];
+
+const COSMETIC_ALIASES: Record<CosmeticSlotKey, Record<string, string>> = {
+  hat: {
+    hat_bone_retro: 'bone_retro',
+    bone_retro: 'bone_retro',
+    hat_gorro_urbano: 'gorro_urbano',
+    gorro_urbano: 'gorro_urbano',
+    hat_coroa_desbrava: 'coroa_desbrava',
+    coroa_desbrava: 'coroa_desbrava',
+  },
+  glasses: {
+    glasses_aviador: 'aviador',
+    aviador: 'aviador',
+    glasses_viseira_neon: 'viseira_neon',
+    viseira_neon: 'viseira_neon',
+  },
+  bike: {
+    bike_speed_carbon: 'speed_carbon',
+    speed_carbon: 'speed_carbon',
+    bike_dourada: 'bike_dourada',
+  },
+  shoe: {
+    shoe_turbo_coral: 'turbo_coral',
+    turbo_coral: 'turbo_coral',
+    shoe_relampago: 'relampago',
+    relampago: 'relampago',
+  },
+  pet: {
+    pet_caramelo: 'caramelo',
+    caramelo: 'caramelo',
+    pet_gatinho_pixel: 'gatinho_pixel',
+    gatinho_pixel: 'gatinho_pixel',
+  },
+  color: {
+    color_neon_cyber: 'neon_cyber',
+    neon_cyber: 'neon_cyber',
+    color_aurora_real: 'aurora_real',
+    aurora_real: 'aurora_real',
+  },
+};
+
+const COLOR_COSMETIC_PRESETS: Record<string, { top: string; helmet: string; bike: string }> = {
+  neon_cyber: { top: '#4fe0b0', helmet: '#ff7ab8', bike: '#5ab8f0' },
+  aurora_real: { top: '#6e4bd8', helmet: '#ffd23f', bike: '#ff6b9a' },
+};
+
+const BIKE_COSMETIC_PRESETS: Record<string, { bike: string; bikeShade: string }> = {
+  speed_carbon: { bike: '#1d1a2a', bikeShade: '#0f0d18' },
+  bike_dourada: { bike: '#ffd23f', bikeShade: '#d19a1a' },
+};
+
+const SHOE_COSMETIC_PRESETS: Record<string, string> = {
+  turbo_coral: '#ff6b5a',
+  relampago: '#ffd23f',
+};
+
+/** Normaliza tanto `item_id` (ex.: `hat_bone_retro`) quanto `cosmeticKey` (ex.: `bone_retro`). */
+export function normalizeCosmeticKey(slot: CosmeticSlotKey, value: string | null | undefined): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  return COSMETIC_ALIASES[slot][trimmed] ?? trimmed;
 }
 
 export interface ColorSwatch {
@@ -202,13 +280,46 @@ export function resolveAvatar(profile: { characterId: string; avatar?: AvatarCon
 /** Chave compacta e determinística para cache de rasters. */
 export function avatarKey(avatar: AvatarConfig): string {
   const c = avatar.colors;
-  return `${avatar.hair}|${c.skin}|${c.hair}|${c.top}|${c.bottom}|${c.shoe}|${c.helmet}|${c.bike}`;
+  const base = `${avatar.hair}|${c.skin}|${c.hair}|${c.top}|${c.bottom}|${c.shoe}|${c.helmet}|${c.bike}`;
+  const cos = avatar.cosmetics;
+  if (!cos) return base;
+  const parts = COSMETIC_SLOTS.map((slot) => normalizeCosmeticKey(slot, cos[slot]) ?? '');
+  if (parts.every((p) => p === '')) return base;
+  return `${base}|cos:${parts.join(',')}`;
 }
 
-/** Compõe um quadro de sprite diretamente a partir de um `AvatarConfig`. */
+/** Compõe um quadro de sprite diretamente a partir de um `AvatarConfig` (com cosméticos equipados). */
 export function avatarFrame(avatar: AvatarConfig, modality: Modality, facing: Facing, frame: number): Raster {
+  const cos = avatar.cosmetics;
+  const colorKey = normalizeCosmeticKey('color', cos?.color);
+  const bikeKey = normalizeCosmeticKey('bike', cos?.bike);
+  const shoeKey = normalizeCosmeticKey('shoe', cos?.shoe);
+  const hatKey = normalizeCosmeticKey('hat', cos?.hat) as HatCosmeticId | undefined;
+  const glassesKey = normalizeCosmeticKey('glasses', cos?.glasses) as GlassesCosmeticId | undefined;
+  const petKey = normalizeCosmeticKey('pet', cos?.pet) as PetCosmeticId | undefined;
+
+  const colorPreset = colorKey ? COLOR_COSMETIC_PRESETS[colorKey] : undefined;
+  const effectiveColors: AvatarColors = {
+    ...avatar.colors,
+    ...(colorPreset ? { top: colorPreset.top, helmet: colorPreset.helmet, bike: colorPreset.bike } : {}),
+    ...(shoeKey && SHOE_COSMETIC_PRESETS[shoeKey] ? { shoe: SHOE_COSMETIC_PRESETS[shoeKey] } : {}),
+  };
+
+  const resolved: CharacterColors = resolveCharacterColors(effectiveColors);
+  const bikePreset = bikeKey ? BIKE_COSMETIC_PRESETS[bikeKey] : undefined;
+  if (bikePreset) {
+    resolved.bike = bikePreset.bike;
+    resolved.bikeShade = bikePreset.bikeShade;
+  }
+
   return characterFrame(
-    { hair: avatar.hair, colors: resolveCharacterColors(avatar.colors) },
+    {
+      hair: avatar.hair,
+      colors: resolved,
+      hat: hatKey,
+      glasses: glassesKey,
+      pet: petKey,
+    },
     modality,
     facing,
     frame,

@@ -3,11 +3,11 @@ import { create } from 'zustand';
 import { CHARACTERS } from '../sprites/characters.ts';
 import { COIN_VALUE, RARITY_INFO } from '../sprites/items.ts';
 import { levelFromXp } from './progression.ts';
-import { XP } from './config.ts';
+import { REVEAL_RADIUS_M, XP } from './config.ts';
 import type {
-  AchievementRecord, AchievementUnlockEvent, ActivitySummary, AvatarConfig, Capture, City, Coin, CoinsByKind,
-  GpsStatus, LiveActivity, Modal, Modality, PendingMigration, PlannedRoute, PlayerFix, Poi, Profile, RouteProgress,
-  Settings, Tab, Toast, Totals,
+  AchievementRecord, AchievementUnlockEvent, ActiveBooster, ActivitySummary, AvatarConfig, BoosterCategory,
+  Capture, City, Coin, CoinsByKind, GpsStatus, LiveActivity, Modal, Modality, PendingMigration, PlannedRoute,
+  PlayerFix, Poi, Profile, RouteProgress, Settings, Tab, Toast, Totals,
 } from './types.ts';
 
 export interface PersistedState {
@@ -85,6 +85,8 @@ interface RuntimeState {
   authLoading: boolean;
   pendingInviteUsername: string | null;
   pendingMigration: PendingMigration | null;
+  /** Boosters online ativos na sessão atual (não persistido em save:v1). */
+  activeBoosters: ActiveBooster[];
 }
 
 interface Actions {
@@ -122,6 +124,10 @@ interface Actions {
   setPendingInviteUsername(username: string | null): void;
   setPendingMigration(migration: PendingMigration | null): void;
   bumpSocialRev(): void;
+  setWallet(wallet: number): void;
+  grantUnlocked(ids: string[]): void;
+  setActiveBoosters(boosters: ActiveBooster[]): void;
+  addActiveBooster(booster: ActiveBooster): void;
   updateProfileIdentity(patch: Partial<Pick<Profile, 'name' | 'username' | 'isPublic'>>): void;
   reconcileVerifiedActivity(payload: VerifiedActivityReconciliation): void;
   applyCloudSnapshot(snapshot: Partial<PersistedState>): void;
@@ -162,6 +168,33 @@ export function uid(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 }
 
+/** Retorna o multiplicador ativo para uma categoria de booster (1 se não houver ativo). */
+export function activeBoosterMultiplier(
+  boosters: readonly ActiveBooster[],
+  category: BoosterCategory,
+  boostUsageIds?: readonly string[],
+  now = Date.now(),
+): number {
+  for (const b of boosters) {
+    if (b.category !== category) continue;
+    if (b.expiresAt < now) continue;
+    if (boostUsageIds && !boostUsageIds.includes(b.usageId)) continue;
+    return Math.max(1, Math.min(5, Number.isFinite(b.multiplier) ? b.multiplier : 1));
+  }
+  return 1;
+}
+
+/** Raio de revelação efetivo considerando eventual booster `boost_fog` ligado à atividade atual. */
+export function effectiveRevealRadius(
+  s: Pick<GameState, 'live' | 'activeBoosters'> = useGame.getState(),
+  now = Date.now(),
+): number {
+  const fogMult = s.live
+    ? activeBoosterMultiplier(s.activeBoosters, 'boost_fog', s.live.boostUsageIds, now)
+    : 1;
+  return REVEAL_RADIUS_M * fogMult;
+}
+
 /** Tempo de cronômetro da atividade em segundos, considerando o trecho em andamento. */
 export function liveElapsed(live: LiveActivity, now = Date.now()): number {
   return live.elapsedS + (live.resumedAt ? (now - live.resumedAt) / 1000 : 0);
@@ -191,6 +224,7 @@ export const useGame = create<GameState>()((set, get) => ({
   authLoading: false,
   pendingInviteUsername: null,
   pendingMigration: null,
+  activeBoosters: [],
 
   createProfile(name, avatar, modality, characterId = 'custom', opts) {
     set({
@@ -261,10 +295,15 @@ export const useGame = create<GameState>()((set, get) => ({
   addXp(n) {
     if (n <= 0) return;
     const s = get();
+    const xpMult = s.live
+      ? activeBoosterMultiplier(s.activeBoosters, 'boost_xp', s.live.boostUsageIds)
+      : 1;
+    const gained = Math.round(n * xpMult);
+    if (gained <= 0) return;
     const before = levelFromXp(s.xp).level;
-    const xp = s.xp + n;
+    const xp = s.xp + gained;
     const after = levelFromXp(xp);
-    const live = s.live ? { ...s.live, xp: s.live.xp + n } : null;
+    const live = s.live ? { ...s.live, xp: s.live.xp + gained } : null;
     set({ xp, live });
     if (after.level > before) get().pushModal({ type: 'levelup', level: after.level, title: after.title });
   },
@@ -273,6 +312,13 @@ export const useGame = create<GameState>()((set, get) => ({
     const s = get();
     if (!s.profile || s.live) return;
     const now = Date.now();
+    const seenCats = new Set<BoosterCategory>();
+    const boostUsageIds: string[] = [];
+    for (const b of s.activeBoosters) {
+      if (b.expiresAt <= now || seenCats.has(b.category)) continue;
+      seenCats.add(b.category);
+      boostUsageIds.push(b.usageId);
+    }
     const live: LiveActivity = {
       id: uid('act'),
       modality: s.profile.modality,
@@ -292,6 +338,7 @@ export const useGame = create<GameState>()((set, get) => ({
       cityIds: [],
       source: 'live',
       verificationStatus: 'local',
+      ...(boostUsageIds.length ? { boostUsageIds } : {}),
       spawnCenters: [],
       spawns: 0,
     };
@@ -356,14 +403,19 @@ export const useGame = create<GameState>()((set, get) => ({
   collectCoin(coin) {
     const s = get();
     const value = COIN_VALUE[coin.kind];
+    const coinsMult = s.live
+      ? activeBoosterMultiplier(s.activeBoosters, 'boost_coins', s.live.boostUsageIds)
+      : 1;
+    const walletCredit = Math.round(value * coinsMult);
     const prevKinds = s.live?.coinsByKind ?? EMPTY_COINS_BY_KIND;
     set({
       coins: s.coins.filter((c) => c.id !== coin.id),
-      wallet: s.wallet + value,
+      wallet: s.wallet + walletCredit,
       totals: { ...s.totals, coinsValue: s.totals.coinsValue + value, coinsCount: s.totals.coinsCount + 1 },
       live: s.live
         ? {
             ...s.live,
+            // Manter valor base para paridade estrita com `coinsByKind` na Edge Function `verify-activity`.
             coinsValue: s.live.coinsValue + value,
             coinsCount: s.live.coinsCount + 1,
             coinsByKind: { ...prevKinds, [coin.kind]: (prevKinds[coin.kind] ?? 0) + 1 },
@@ -426,6 +478,41 @@ export const useGame = create<GameState>()((set, get) => ({
   bumpSocialRev() {
     set({ socialRev: get().socialRev + 1 });
   },
+  setWallet(wallet) {
+    if (!Number.isFinite(wallet)) return;
+    set({ wallet: Math.max(0, Math.round(wallet)) });
+  },
+  grantUnlocked(ids) {
+    if (!ids.length) return;
+    const cur = get().unlocked;
+    const merged = [...new Set([...cur, ...ids])];
+    if (merged.length !== cur.length) {
+      set({ unlocked: merged });
+    }
+  },
+  setActiveBoosters(boosters) {
+    const now = Date.now();
+    set({ activeBoosters: boosters.filter((b) => b.expiresAt > now) });
+  },
+  addActiveBooster(booster) {
+    const s = get();
+    const now = Date.now();
+    const filtered = s.activeBoosters.filter(
+      (b) => b.expiresAt > now && b.usageId !== booster.usageId && b.category !== booster.category,
+    );
+    const nextBoosters = [...filtered, booster];
+    let nextLive = s.live;
+    if (nextLive) {
+      const existingIds = nextLive.boostUsageIds ?? [];
+      const hasCat = existingIds.some((id) =>
+        s.activeBoosters.some((b) => b.usageId === id && b.category === booster.category && b.expiresAt >= now),
+      );
+      if (!hasCat && !existingIds.includes(booster.usageId)) {
+        nextLive = { ...nextLive, boostUsageIds: [...existingIds, booster.usageId] };
+      }
+    }
+    set({ activeBoosters: nextBoosters, live: nextLive });
+  },
   updateProfileIdentity(patch) {
     const p = get().profile;
     if (!p) return;
@@ -434,6 +521,8 @@ export const useGame = create<GameState>()((set, get) => ({
   reconcileVerifiedActivity(payload) {
     const s = get();
     const now = Date.now();
+    const targetAct = s.activities.find((a) => a.id === payload.activityId);
+    const consumedIds = new Set(targetAct?.boostUsageIds ?? []);
     const activities = s.activities.map((a) => {
       if (a.id !== payload.activityId) return a;
       return {
@@ -451,6 +540,7 @@ export const useGame = create<GameState>()((set, get) => ({
     const auth = payload.authoritative;
     set({
       activities,
+      activeBoosters: s.activeBoosters.filter((b) => b.expiresAt > now && !consumedIds.has(b.usageId)),
       xp: auth.xp,
       wallet: auth.wallet,
       totals: {
@@ -490,6 +580,7 @@ export const useGame = create<GameState>()((set, get) => ({
       lastSyncError: null,
       lastSyncedAt: null,
       pendingMigration: null,
+      activeBoosters: [],
       tab: 'map',
       modals: [],
       toasts: [],

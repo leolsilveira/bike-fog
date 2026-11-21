@@ -201,6 +201,185 @@ const HELMET: Record<Dir, Art> = {
 };
 
 // ---------------------------------------------------------------------------
+// Cosméticos equipáveis em camadas (chapéus, óculos e pets).
+// ---------------------------------------------------------------------------
+export type HatCosmeticId = 'bone_retro' | 'gorro_urbano' | 'coroa_desbrava';
+export type GlassesCosmeticId = 'aviador' | 'viseira_neon';
+export type PetCosmeticId = 'caramelo' | 'gatinho_pixel';
+
+const HATS: Record<HatCosmeticId, { art: Record<Dir, Art>; pal: Palette }> = {
+  bone_retro: {
+    pal: { c: '#ff6b5a', C: '#c94a3f', w: '#fff8ec' },
+    art: {
+      down: [
+        '....................',
+        '......oooooooo......',
+        '.....occcccccco.....',
+        '....occcwwwwccco....',
+        '....occcccccccco....',
+        '...oooooooooooooo...',
+        '...oCCCCCCCCCCCCo...',
+        '....oooooooooooo....',
+      ],
+      up: [
+        '....................',
+        '......oooooooo......',
+        '.....occcccccco.....',
+        '....occcccccccco....',
+        '....occCCCCCCcco....',
+        '....occcooooccco....',
+        '....oCCCCCCCCCCo....',
+        '.....oooooooooo.....',
+      ],
+      side: [
+        '....................',
+        '......ooooooo.......',
+        '.....occcccccoo.....',
+        '....occcccccccco....',
+        '....occcccccccccoo..',
+        '....oooooooooooooo..',
+        '.....oCCCCCCCCCCoo..',
+        '................oo..',
+      ],
+    },
+  },
+  gorro_urbano: {
+    pal: { c: '#6e4bd8', C: '#4a2fa0' },
+    art: {
+      down: [
+        '.......oooooo.......',
+        '......oCCCCCCo......',
+        '.....occcccccco.....',
+        '....occcccccccco....',
+        '....oCCCCCCCCCCo....',
+        '....occcccccccco....',
+        '....oooooooooooo....',
+        '....................',
+      ],
+      up: [
+        '.......oooooo.......',
+        '......oCCCCCCo......',
+        '.....occcccccco.....',
+        '....occcccccccco....',
+        '....oCCCCCCCCCCo....',
+        '....occcccccccco....',
+        '....oooooooooooo....',
+        '....................',
+      ],
+      side: [
+        '.......oooooo.......',
+        '......oCCCCCCoo.....',
+        '.....occccccccco....',
+        '....occcccccccccoo..',
+        '....oCCCCCCCCCCCo...',
+        '....occccccccccco...',
+        '....ooooooooooooo...',
+        '....................',
+      ],
+    },
+  },
+  coroa_desbrava: {
+    pal: { c: '#ffd23f', C: '#d19a1a', g: '#ff5f8f' },
+    art: {
+      down: [
+        '....oo..oooo..oo....',
+        '....ocooccccooco....',
+        '....occcccccccco....',
+        '....occgccccgcco....',
+        '....occcccccccco....',
+        '....oCCCCCCCCCCo....',
+        '....oooooooooooo....',
+        '....................',
+      ],
+      up: [
+        '....oo..oooo..oo....',
+        '....ocooccccooco....',
+        '....occcccccccco....',
+        '....occcccccccco....',
+        '....occcccccccco....',
+        '....oCCCCCCCCCCo....',
+        '....oooooooooooo....',
+        '....................',
+      ],
+      side: [
+        '.....oo..ooo..oo....',
+        '.....ocooCCCooco....',
+        '.....occccccccco....',
+        '.....occcgcccgco....',
+        '.....occccccccco....',
+        '.....oCCCCCCCCCo....',
+        '.....ooooooooooo....',
+        '....................',
+      ],
+    },
+  },
+};
+
+const GLASSES: Record<GlassesCosmeticId, { art: Partial<Record<Dir, Art>>; pal: Palette }> = {
+  aviador: {
+    pal: { g: '#2a1f3d', l: '#a5a2bd', w: '#fff8ec' },
+    art: {
+      down: [
+        '....................',
+        '.....oooooooooo.....',
+        '....oogwgooogwgo....',
+        '.....oooo..oooo.....',
+      ],
+      side: [
+        '....................',
+        '.........oooooooo...',
+        '........ooologwgoo..',
+        '...........ooooooo..',
+      ],
+    },
+  },
+  viseira_neon: {
+    pal: { g: '#4fe0b0', w: '#e8fffb' },
+    art: {
+      down: [
+        '....................',
+        '....oooooooooooo....',
+        '....ogwwgggggggo....',
+        '....oooooooooooo....',
+      ],
+      side: [
+        '....................',
+        '........oooooooooo..',
+        '.......oogwwgggggo..',
+        '........oooooooooo..',
+      ],
+    },
+  },
+};
+
+const PETS: Record<PetCosmeticId, { art: Art; pal: Palette }> = {
+  caramelo: {
+    pal: { p: '#e09a48', P: '#a86a24', w: '#fff6e0', r: '#ff5a5a' },
+    art: [
+      '.o...o.',
+      'opooopo',
+      'opepppo',
+      '.oppwp.',
+      '.orrrr.',
+      '.oppppo',
+      '..o..o.',
+    ],
+  },
+  gatinho_pixel: {
+    pal: { p: '#b77bff', P: '#7440c0', w: '#fff6e0', g: '#4fe0b0' },
+    art: [
+      'o.....o',
+      'opooopo',
+      'opgpgpo',
+      '.opwpo.',
+      '.opppo.',
+      '.oPPppo',
+      '..o..o.',
+    ],
+  },
+};
+
+// ---------------------------------------------------------------------------
 // Corpo do corredor: 20 x 12, encaixa logo abaixo da cabeça (y = 14).
 // ---------------------------------------------------------------------------
 const RUN: Record<Dir, Art[]> = {
@@ -470,6 +649,9 @@ export interface CharacterColors {
 export interface CharacterAppearance {
   hair: HairStyle;
   colors: CharacterColors;
+  hat?: HatCosmeticId;
+  glasses?: GlassesCosmeticId;
+  pet?: PetCosmeticId;
 }
 
 export interface CharacterDef extends CharacterAppearance {
@@ -622,19 +804,41 @@ export function characterFrame(def: CharacterAppearance, modality: Modality, fac
   const pal = paletteFor(def);
   const layers: Layer[] = [];
   let bob = 0;
+  let headX = HEAD_X;
+  let headY = RUN_HEAD_Y;
   if (modality === 'run') {
     const cycle = [1, 0, 2, 0];
     const pose = frame < 0 ? 0 : cycle[frame % 4];
     bob = frame >= 0 && pose === 0 ? 1 : 0;
+    headY = RUN_HEAD_Y + bob + 2;
     layers.push({ art: RUN[dir][pose], x: HEAD_X, y: RUN_BODY_Y + bob + 2 });
-    layers.push({ art: HEADS[def.hair][dir], x: HEAD_X, y: RUN_HEAD_Y + bob + 2 });
+    layers.push({ art: HEADS[def.hair][dir], x: headX, y: headY });
   } else {
     const pose = frame < 0 ? 0 : frame % 2;
     bob = frame >= 0 && pose === 1 ? 1 : 0;
     layers.push({ art: BIKE[dir][pose], x: 0, y: BIKE_BODY_Y + 1 });
-    const headX = dir === 'side' ? HEAD_X + 3 : HEAD_X;
-    layers.push({ art: HEADS[def.hair][dir], x: headX, y: BIKE_HEAD_Y + bob });
-    layers.push({ art: HELMET[dir], x: headX, y: BIKE_HEAD_Y + bob });
+    headX = dir === 'side' ? HEAD_X + 3 : HEAD_X;
+    headY = BIKE_HEAD_Y + bob;
+    layers.push({ art: HEADS[def.hair][dir], x: headX, y: headY });
+    if (!def.hat) {
+      layers.push({ art: HELMET[dir], x: headX, y: headY });
+    }
+  }
+  if (def.hat && HATS[def.hat]) {
+    const hat = HATS[def.hat];
+    layers.push({ art: hat.art[dir], palette: hat.pal, x: headX, y: headY });
+  }
+  if (def.glasses && GLASSES[def.glasses]) {
+    const gl = GLASSES[def.glasses];
+    const glArt = gl.art[dir];
+    if (glArt) {
+      layers.push({ art: glArt, palette: gl.pal, x: headX, y: headY + 8 });
+    }
+  }
+  if (def.pet && PETS[def.pet]) {
+    const pet = PETS[def.pet];
+    const petBob = frame >= 0 && frame % 2 === 1 ? 1 : 0;
+    layers.push({ art: pet.art, palette: pet.pal, x: 0, y: 22 + petBob });
   }
   const r = rasterize(FRAME_W, FRAME_H, layers, pal);
   return facing === 'left' ? flipRaster(r) : r;
@@ -647,5 +851,10 @@ export const ALL_CHARACTER_ART: Record<string, Art> = (() => {
   for (const [d, a] of Object.entries(HELMET)) out[`helmet.${d}`] = a;
   for (const [d, frames] of Object.entries(RUN)) frames.forEach((a, i) => (out[`run.${d}.${i}`] = a));
   for (const [d, frames] of Object.entries(BIKE)) frames.forEach((a, i) => (out[`bike.${d}.${i}`] = a));
+  for (const [id, hat] of Object.entries(HATS)) for (const [d, a] of Object.entries(hat.art)) out[`hat.${id}.${d}`] = a;
+  for (const [id, gl] of Object.entries(GLASSES)) {
+    for (const [d, a] of Object.entries(gl.art)) if (a) out[`glasses.${id}.${d}`] = a;
+  }
+  for (const [id, pet] of Object.entries(PETS)) out[`pet.${id}`] = pet.art;
   return out;
 })();

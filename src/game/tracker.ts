@@ -1,7 +1,7 @@
 // Recebe cada posição (GPS real ou simulador) e aplica as regras do jogo.
 import {
   COINS_PER_SPAWN, COIN_PICKUP_M, COIN_SPAWN_RADIUS_M, MAX_ACCURACY_M, MAX_SPAWNS_PER_ACTIVITY, MAX_SPEED,
-  RESPAWN_DISTANCE_M, REVEAL_RADIUS_M, XP,
+  RESPAWN_DISTANCE_M, XP,
 } from './config.ts';
 import { haversine, metersPerMercUnit, toMerc, type LngLat } from './geo.ts';
 import { fog } from './fog.ts';
@@ -9,7 +9,7 @@ import { pois } from './pois.ts';
 import { spawnCoins, type RoadSampler } from './coins.ts';
 import { bumpCityCells, cityAtSync, ensureCityAt } from './cities.ts';
 import { checkAndGrantAchievements } from './achievements.ts';
-import { useGame } from './store.ts';
+import { activeBoosterMultiplier, effectiveRevealRadius, useGame } from './store.ts';
 import { haptic, sfx, vibrate } from './audio.ts';
 import { loadTrack, saveTrack } from './persist.ts';
 import { roadsNear, waitForTiles } from './tiles.ts';
@@ -94,13 +94,18 @@ function collectNear(a: LngLat, b: LngLat): boolean {
   let collected = false;
   for (const coin of s.coins) {
     if (distToSegment(coin, a, b) > COIN_PICKUP_M) continue;
-    useGame.getState().collectCoin(coin);
+    const cur = useGame.getState();
+    const coinsMult = cur.live
+      ? activeBoosterMultiplier(cur.activeBoosters, 'boost_coins', cur.live.boostUsageIds)
+      : 1;
+    cur.collectCoin(coin);
     const value = COIN_VALUE[coin.kind];
+    const displayValue = Math.round(value * coinsMult);
     if (coin.kind === 'gem') sfx.gem();
     else if (value >= 20) sfx.coinBig();
     else sfx.coin();
     vibrate(30);
-    useGame.getState().toast(`+${value} · ${COIN_LABEL[coin.kind]}`, 'coin', coin.kind);
+    useGame.getState().toast(`+${displayValue} · ${COIN_LABEL[coin.kind]}`, 'coin', coin.kind);
     collected = true;
   }
   return collected;
@@ -199,7 +204,7 @@ export function handleFix(fix: PlayerFix): void {
 }
 
 function revealAndCollect(a: PlayerFix, b: PlayerFix): void {
-  const { added, byCity } = fog.revealAlong(a, b, REVEAL_RADIUS_M, cityAtSync);
+  const { added, byCity } = fog.revealAlong(a, b, effectiveRevealRadius(useGame.getState(), b.t), cityAtSync);
   if (added.length) {
     for (const [id, n] of Object.entries(byCity)) bumpCityCells(id, n);
     const st = useGame.getState();

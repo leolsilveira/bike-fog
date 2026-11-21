@@ -1,6 +1,6 @@
 # Estado do Backend e Integração — Desbrava
 
-**Última atualização:** 2026-11-21 (fechamento do marco **M4 — `friends-ranking-ui`** na branch `react-native`)
+**Última atualização:** 2026-11-21 (fechamento do marco **M5 — `store-cosmetics-ui`** na branch `react-native`)
 
 Este documento acompanha o que já está implantado no Supabase, o que já existe no código do aplicativo Expo/React Native, o que foi adiado no escopo atual e como rodar/testar o projeto localmente ou no dispositivo.
 
@@ -85,8 +85,12 @@ Este documento acompanha o que já está implantado no Supabase, o que já exist
   - Telas, modais e navegação (`SocialScreen.tsx`, `FriendProfileModal.tsx`, `Hud.tsx`, `Modals.tsx`, `App.tsx`, `src/game/types.ts`, `src/game/store.ts`): nova aba **Social** na `TabBar`, estado de Convidado com CTA de login, banner de convite pendente por deep link (`pendingInviteUsername`), busca por `@username`/nome, solicitações recebidas/enviadas, lista de amigos/bloqueados, modal de resumo público do explorador (sem expor trilhas, atividades, carteira ou ajustes) e filtros completos de ranking.
   - Polimento M3 (`src/services/migration.ts`): `resolveMigrationCloudOnly()` agora conclui `pullCloudToLocal({ mode: 'replace' })` antes de limpar dados locais e fechar o `MigrationModal`, preservando o estado local e exibindo erros de rede caso a nuvem falhe.
   - Verificação: `scripts/verify-social.ts`, `scripts/test-achievements.ts`, `npm run typecheck`, `npm run lint`, `npm run build:web` e smoke check no Chrome headless contra `dist/`.
-- **Próximo marco em andamento:**
-  - **M5 (`store-cosmetics-ui`):** tela da Loja (`ShopScreen.tsx`, `src/services/storeService.ts`), compra atômica (`purchase_store_item`), inventário/cosméticos em pixel art (`src/sprites/*` + `map-runtime/*`) e ativação online de boosters (`user_boost_usages`).
+- **Concluído — M5 (`store-cosmetics-ui`):**
+  - Serviços da Loja (`src/services/storeServiceCore.ts` puro para Node 24 e `src/services/storeService.ts`): catálogo online (`store_items`), inventário e carteira autoritativos (`user_inventory`, `profiles.wallet`, desbloqueio de personagens `char_*`), compra atômica via RPC `purchase_store_item`, ativação online de boosters (`user_boost_usages`) e equipamento/remoção de cosméticos (`equipCosmetic`) com sincronização automática de perfil (`syncProfile`), mapeando erros offline e de validação em pt-BR.
+  - Cosméticos em pixel art e mapa (`src/sprites/icons.ts`, `src/sprites/characters.ts`, `src/sprites/avatar.ts`, `src/services/syncCore.ts`, `map-runtime/` + `src/map/mapHtml.generated.ts`): suporte opcional a `AvatarConfig.cosmetics` (`hat`, `glasses`, `bike`, `shoe`, `pet`, `color`) renderizado no mesmo pipeline tanto nos sprites da interface quanto no mapa em WebView/iframe, com validação estrita em `isValidAvatarConfig`.
+  - Boosters no gameplay (`src/game/types.ts`, `src/game/store.ts`, `src/game/tracker.ts`): estado em tempo real `activeBoosters`, vínculo automático de `boostUsageIds` na atividade ao vivo (`startActivity` / `addActiveBooster` / `finishActivity`) com reconciliação na `verify-activity`, multiplicador de raio `boost_fog` em `effectiveRevealRadius` (1:1 com o servidor), multiplicador `boost_xp` e prévia `boost_coins` mantendo `live.coinsValue` no valor base para paridade com `coinsByKind`.
+  - Interface e navegação (`src/ui/screens/ShopScreen.tsx`, `src/ui/components/Hud.tsx`, `src/map/sync.ts`, `App.tsx`): nova aba **Loja** (`tab-shop`) na `TabBar`, estado Convidado com CTA de login (`auth-open-btn`), banner de erro/offline (`store-offline-error`), prévia do avatar equipado, filtros de catálogo (`shop-item-<id>`, `shop-buy-btn`) e seção **Mochila · Boosters** com contagem regressiva e ativação online (`inventory-booster-<id>`, `booster-activate-btn`).
+  - Verificação: `npm run build:map`, `scripts/verify-store.ts` (unitário + integração ao vivo contra `lugwebngeyadfrqoapsg`), `scripts/test-achievements.ts`, `scripts/verify-sync-core.ts`, `scripts/verify-auth-migration.ts`, `scripts/verify-social.ts`, `npm run typecheck`, `npm run lint`, `npm run build:web` e smoke check no Chrome headless contra `dist/`.
 
 ---
 

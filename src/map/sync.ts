@@ -47,7 +47,7 @@ const VIEW_PAD = 0.25;
 
 /** Câmera inclinada só com atividade em andamento (gravando ou pausada); fora disso, visão de cima. */
 function cameraMode(s: GameState): CameraMode {
-  if (s.tab === 'stats') return 'stats';
+  if (s.tab === 'stats' || s.tab === 'shop') return 'stats';
   return s.live ? 'ride' : 'map';
 }
 

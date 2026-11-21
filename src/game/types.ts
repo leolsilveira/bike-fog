@@ -152,7 +152,19 @@ export interface RouteProgress {
 }
 
 /** Abas da barra. Gravar não é aba: o botão do meio abre a folha "Nova atividade" (ver store `planning`). */
-export type Tab = 'map' | 'social' | 'stats';
+export type Tab = 'map' | 'social' | 'shop' | 'stats';
+
+export type BoosterCategory = 'boost_xp' | 'boost_fog' | 'boost_coins';
+
+export interface ActiveBooster {
+  usageId: string;
+  itemId: string;
+  category: BoosterCategory;
+  multiplier: number;
+  name: string;
+  activatedAt: number;
+  expiresAt: number;
+}
 
 export interface PlayerFix extends LngLat {
   accuracy: number;

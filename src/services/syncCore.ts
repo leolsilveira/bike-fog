@@ -20,6 +20,7 @@ import type {
   VerificationStatus,
 } from '../game/types.ts';
 import {
+  COSMETIC_SLOTS,
   HAIR_STYLES,
   avatarFromCharacter,
   type AvatarColorKey,
@@ -159,6 +160,7 @@ async function setFogSync(deps: SyncDeps, state: FogSyncState): Promise<void> {
 }
 
 const VALID_HAIR_STYLES = new Set<string>(HAIR_STYLES.map((h) => h.id));
+const VALID_COSMETIC_SLOTS = new Set<string>(COSMETIC_SLOTS);
 const AVATAR_COLOR_KEYS: readonly AvatarColorKey[] = [
   'skin',
   'hair',
@@ -171,13 +173,26 @@ const AVATAR_COLOR_KEYS: readonly AvatarColorKey[] = [
 
 export function isValidAvatarConfig(value: unknown): value is AvatarConfig {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const obj = value as { hair?: unknown; colors?: unknown };
+  const obj = value as { hair?: unknown; colors?: unknown; cosmetics?: unknown };
   if (typeof obj.hair !== 'string' || !VALID_HAIR_STYLES.has(obj.hair)) return false;
   if (!obj.colors || typeof obj.colors !== 'object' || Array.isArray(obj.colors)) return false;
   const colors = obj.colors as Record<string, unknown>;
   for (const key of AVATAR_COLOR_KEYS) {
     const color = colors[key];
     if (typeof color !== 'string' || color.trim().length === 0) return false;
+  }
+  if (obj.cosmetics !== undefined) {
+    if (!obj.cosmetics || typeof obj.cosmetics !== 'object' || Array.isArray(obj.cosmetics)) {
+      return false;
+    }
+    const cos = obj.cosmetics as Record<string, unknown>;
+    for (const [slot, val] of Object.entries(cos)) {
+      if (!VALID_COSMETIC_SLOTS.has(slot)) return false;
+      if (val === undefined) continue;
+      if (typeof val !== 'string' || val.trim().length === 0 || val.trim().length > 64) {
+        return false;
+      }
+    }
   }
   return true;
 }
